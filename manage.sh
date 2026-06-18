@@ -88,9 +88,16 @@ pids_on_port() {
 
 cmd_start() {
   if is_running; then ok "Already running"; return; fi
-  if use_systemd; then say "Starting via systemd"; sd start "$SERVICE"; ok "Started"; return; fi
+  if use_systemd; then
+    say "Starting via systemd"
+    if sd start "$SERVICE"; then ok "Started"; else
+      err "systemd start failed — بررسی کن:"
+      sd status "$SERVICE" --no-pager -l | tail -20 || true
+    fi
+    return
+  fi
   # Guard: clear any orphan holding our port so we don't hit EADDRINUSE.
-  local stale; stale="$(pids_on_port)"
+  local stale; stale="$(pids_on_port)" || true
   if [ -n "$stale" ]; then
     warn "Port $(get_port) in use by orphan PID(s): $stale — terminating"
     echo "$stale" | xargs -r kill 2>/dev/null || true
@@ -112,7 +119,7 @@ cmd_stop() {
   fi
   rm -f "$PID_FILE"
   # Also clean up any orphan on the port (e.g. a process the PID file lost track of).
-  local stale; stale="$(pids_on_port)"
+  local stale; stale="$(pids_on_port)" || true
   if [ -n "$stale" ]; then
     warn "Cleaning orphan(s) on port $(get_port): $stale"
     echo "$stale" | xargs -r kill 2>/dev/null || true
