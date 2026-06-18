@@ -1,4 +1,4 @@
-/* اِل من خورا — Authentication view (login / register / guest) */
+/* اَل من خورا — Authentication view (login / register / guest) */
 import { h, store, api, toast, $ } from '../core.js';
 import { navigate, refreshMe, redirectAfterAuth } from '../app.js';
 
@@ -66,7 +66,7 @@ export function AuthView(mode = 'login') {
     if (tab === 'login') {
       formMount.append(
         h('form', { onsubmit: doLogin },
-          field('نام کاربری یا ایمیل', h('input', { class: 'input', name: 'username', required: true, autocomplete: 'username', placeholder: 'مثلاً Sina' })),
+          field('نام کاربری یا ایمیل', h('input', { class: 'input', name: 'username', required: true, autocomplete: 'username', placeholder: 'نام کاربری یا ایمیل' })),
           field('رمز عبور', h('input', { class: 'input', name: 'password', type: 'password', required: true, autocomplete: 'current-password', placeholder: '••••••••' })),
           errorEl,
           h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, 'ورود به حساب'),
@@ -97,7 +97,7 @@ export function AuthView(mode = 'login') {
 
   return h('div', { class: 'auth-wrap fade-in' },
     h('div', { class: 'card' },
-      h('h1', { class: 'center', style: 'margin-bottom:6px' }, 'اِل من خورا'),
+      h('h1', { class: 'center', style: 'margin-bottom:6px' }, 'اَل من خورا'),
       h('p', { class: 'center muted', style: 'margin-bottom:20px' }, 'وارد شو و نبرد را آغاز کن'),
       tabs,
       formMount,

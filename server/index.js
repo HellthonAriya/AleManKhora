@@ -49,7 +49,7 @@ app.get('*', (req, res, next) => {
 registerSocket(io, manager);
 
 server.listen(PORT, () => {
-  console.log(`\n  اِل من خورا (AleManKhora) running → http://localhost:${PORT}\n`);
+  console.log(`\n  اَل من خورا (AleManKhora) running → http://localhost:${PORT}\n`);
 });
 
 export { app, server, io, manager };

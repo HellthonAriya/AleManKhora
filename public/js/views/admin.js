@@ -1,4 +1,4 @@
-/* اِل من خورا — Admin panel */
+/* اَل من خورا — Admin panel */
 import { h, api, store, toast, faNum, timeAgo, clear, confirmDialog, modal } from '../core.js';
 
 export async function AdminView() {

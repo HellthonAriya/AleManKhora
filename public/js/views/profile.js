@@ -1,4 +1,4 @@
-/* اِل من خورا — Profile & account settings */
+/* اَل من خورا — Profile & account settings */
 import { h, api, store, toast, faNum, timeAgo, initials, applyTheme, PLAYER_COLORS, THEMES } from '../core.js';
 import { refreshMe } from '../app.js';
 

@@ -20,6 +20,11 @@ const DEFAULT_COLORS = ['#36c6ff', '#ff6b6b', '#ffd36b', '#9b8cff'];
 const TIME_LIMITS = [0, 30, 60, 120, 180, 300, 600]; // seconds per player
 const TIME_INCREMENTS = [0, 2, 3, 5, 10];             // seconds added per move
 
+// If the player to move makes no move for this long, the game expires:
+// in 2-player the opponent wins; in 4-player the idle player is eliminated
+// and play continues.
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
 function sanitizeConfig(cfg = {}) {
   const s = getSettings();
   let size = parseInt(cfg.size, 10);
@@ -71,6 +76,7 @@ class Room {
     this.aiSeats = new Set();
     this.createdAt = Date.now();
     this.lastActivity = Date.now();
+    this.idleTimer = null;
     this.rematchVotes = new Set();
     // chess clock
     const ms = (config.timeLimit || 0) * 1000;
@@ -199,6 +205,7 @@ export class GameManager {
       room.status = 'active';
       this._persistStart(room);
       this.startClock(room);
+      this.resetIdleTimer(room);
       this.broadcast(room, 'game:start', room.publicView());
       this.maybeRunAI(room);
       return true;
@@ -251,6 +258,30 @@ export class GameManager {
     this.playerOut(room, seat, 'timeout');
   }
 
+  /* ------------------------- Inactivity timeout --------------------------- */
+
+  /** (Re)start the per-turn inactivity timer for the player who must move. */
+  resetIdleTimer(room) {
+    this.clearIdleTimer(room);
+    if (room.status !== 'active' || room.game.winner !== null) return;
+    const seat = room.game.turn;
+    // AI seats move on their own; no idle expiry for them.
+    if (room.aiSeats.has(seat)) return;
+    room.idleTimer = setTimeout(() => this.onIdle(room, seat), IDLE_TIMEOUT_MS);
+  }
+
+  clearIdleTimer(room) {
+    if (room.idleTimer) { clearTimeout(room.idleTimer); room.idleTimer = null; }
+  }
+
+  onIdle(room, seat) {
+    if (room.status !== 'active' || room.game.winner !== null) return;
+    if (room.game.turn !== seat || room.game.eliminated[seat]) return;
+    // Idle player forfeits this turn. In 2-player the engine ends the game
+    // (opponent wins); in 4-player they are removed and play continues.
+    this.playerOut(room, seat, 'idle');
+  }
+
   /* ------------------------------ Gameplay -------------------------------- */
 
   applyAction(room, seat, action) {
@@ -267,6 +298,7 @@ export class GameManager {
       this.finishGame(room, result.winner);
     } else {
       this.scheduleFlag(room);
+      this.resetIdleTimer(room);
       this.broadcast(room, 'game:clock', room.clockView());
       this.maybeRunAI(room);
     }
@@ -282,6 +314,7 @@ export class GameManager {
       this.finishGame(room, room.game.winner);
     } else {
       this.scheduleFlag(room);
+      this.resetIdleTimer(room);
       this.broadcast(room, 'game:clock', room.clockView());
       this.maybeRunAI(room);
     }
@@ -304,6 +337,7 @@ export class GameManager {
     if (room.status === 'finished') return;
     room.status = 'finished';
     if (room.clock.timer) { clearTimeout(room.clock.timer); room.clock.timer = null; }
+    this.clearIdleTimer(room);
 
     const winnerPlayer = winnerSeat == null ? null : room.players[winnerSeat];
     let eloResult = null;
@@ -397,6 +431,7 @@ export class GameManager {
             if (humansLeft.length === 0 && r.aiSeats.size === 0) {
               r.status = 'aborted';
               if (r.clock.timer) clearTimeout(r.clock.timer);
+              this.clearIdleTimer(r);
               Games.finish(r.id, { status: 'aborted', moveCount: r.game.moveCount });
             } else {
               this.playerOut(r, seat, 'abandon');
@@ -441,6 +476,7 @@ export class GameManager {
         const live = r.players.some((p) => p && p.connected && !p.isAI);
         if (!live && r.spectators.size === 0) {
           if (r.clock.timer) clearTimeout(r.clock.timer);
+          this.clearIdleTimer(r);
           if (r.code) this.codes.delete(r.code);
           this.rooms.delete(r.id);
         }

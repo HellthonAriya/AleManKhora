@@ -1,4 +1,4 @@
-/* اِل من خورا — Lobby: choose a mode, customize, and start playing */
+/* اَل من خورا — Lobby: choose a mode, customize, and start playing */
 import { h, store, toast, modal, faNum, $ } from '../core.js';
 import { GameCustomizer } from '../components.js';
 import { getSocket, navigate } from '../app.js';

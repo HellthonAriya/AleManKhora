@@ -1,5 +1,5 @@
 /* =========================================================================
-   اِل من خورا — App shell: router, navbar, socket, boot
+   اَل من خورا — App shell: router, navbar, socket, boot
    ========================================================================= */
 import { h, $, $$, store, api, clear, toast, applyTheme, initials } from './core.js';
 import { HomeView } from './views/home.js';
@@ -153,7 +153,7 @@ async function boot() {
     const cfg = await api('/config');
     store.set({ config: cfg });
     applyTheme(cfg.defaultTheme);
-    document.title = cfg.siteName || 'اِل من خورا';
+    document.title = cfg.siteName || 'اَل من خورا';
   } catch { /* offline */ }
 
   await refreshMe().catch(() => renderNav());

@@ -72,7 +72,7 @@ addCol('p3_name', 'TEXT');
 
 /* --------------------------- Default settings ----------------------------- */
 const DEFAULT_SETTINGS = {
-  site_name: 'اِل من خورا',
+  site_name: 'اَل من خورا',
   allow_registration: 'true',
   allow_guest: 'true',
   default_board_size: '9',

@@ -1,4 +1,4 @@
-/* اِل من خورا — In-game view (real-time room): 2 or 4 players, chess clock,
+/* اَل من خورا — In-game view (real-time room): 2 or 4 players, chess clock,
    spectating, chat, invites, resign, rematch, voice chat. */
 import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock } from '../core.js';
 import { BoardRenderer } from '../board.js';
@@ -358,7 +358,10 @@ export function GameView(roomId) {
     'player:reconnect': ({ seat: s }) => { if (players[s]) players[s].connected = true; renderPlayerCards(); toast('بازیکن دوباره وصل شد', 'success'); },
     'player:eliminated': ({ seat: s, reason, state: st }) => {
       if (st) state = st;
-      const why = reason === 'timeout' ? 'زمانش تمام شد' : (reason === 'resign' ? 'تسلیم شد' : 'بازی را ترک کرد');
+      const why = reason === 'timeout' ? 'زمانش تمام شد'
+        : reason === 'idle' ? 'به‌خاطر بی‌حرکتی حذف شد'
+        : reason === 'resign' ? 'تسلیم شد'
+        : 'بازی را ترک کرد';
       toast(`${players[s]?.name || 'بازیکن'} ${why}`, 'error');
       syncRenderer();
     },

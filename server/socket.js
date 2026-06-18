@@ -65,8 +65,21 @@ export function registerSocket(io, manager) {
         let room = roomId ? manager.getRoom(roomId) : manager.getRoomByCode(code);
         if (!room) return cb?.({ ok: false, error: 'بازی یافت نشد' });
 
-        // Reconnect if this identity already holds a seat.
         const id = socket.data.identity;
+
+        // Already seated in this room (e.g. the creator navigating into the
+        // game view, or any double room:join from the same socket). Don't
+        // re-seat — just return the existing seat.
+        const mySeat = room.seatOf(socket.id);
+        if (mySeat >= 0) {
+          return cb?.({ ok: true, roomId: room.id, seat: mySeat, view: room.publicView() });
+        }
+        // Already watching this room.
+        if (room.spectators.has(socket.id)) {
+          return cb?.({ ok: true, roomId: room.id, seat: -1, view: room.publicView(), spectator: true });
+        }
+
+        // Reconnect if this identity already holds a seat.
         for (let s = 0; s < room.players.length; s++) {
           const p = room.players[s];
           if (p && !p.isAI && !p.connected &&
@@ -145,6 +158,7 @@ export function registerSocket(io, manager) {
         room.status = 'active';
         room.rematchVotes.clear();
         manager.startClock(room);
+        manager.resetIdleTimer(room);
         manager.broadcast(room, 'game:start', room.publicView());
         manager.maybeRunAI(room);
       }

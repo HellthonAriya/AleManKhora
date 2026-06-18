@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎯 اِل من خورا — AleManKhora
+# 🎯 اَل من خورا — AleManKhora
 
 ### یک بازی استراتژیک آنلاین، بلادرنگ و چندنفره — الهام‌گرفته از Quoridor
 
