@@ -147,6 +147,9 @@ export class QuoridorGame {
     return out;
   }
 
+  /** Unified "is the game finished?" check (matches the chess engine surface). */
+  isOver() { return this.winner !== null; }
+
   /* ------------------------------ Wall geometry ----------------------------- */
 
   hasWall(r, c, o) {

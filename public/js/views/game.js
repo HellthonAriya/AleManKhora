@@ -1,11 +1,15 @@
-/* اَلِ من خورا — In-game view (real-time room): 2 or 4 players, chess clock,
-   spectating, chat, invites, resign, rematch, voice chat. */
+/* اَلِ من خورا — In-game view (real-time room): Quoridor or Chess (2/4-player),
+   chess clock, spectating, chat, invites, resign, draw offers, rematch, voice. */
 import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock, copyText } from '../core.js';
 import { BoardRenderer } from '../board.js';
+import { ChessBoardRenderer } from '../chessboard.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
 
 const SEAT_LABELS = ['۱', '۲', '۳', '۴'];
+const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const PIECE_FA = { p: 'سرباز', n: 'اسب', b: 'فیل', r: 'رخ', q: 'وزیر', k: 'شاه' };
+const TEAM_NAMES = ['تیم قرمز/زرد', 'تیم آبی/سبز'];
 
 export function GameView(roomId) {
   const socket = getSocket();
@@ -18,6 +22,8 @@ export function GameView(roomId) {
   let aiSeats = [];
   let status = 'waiting';
   let code = null;
+  let gameType = 'quoridor';
+  let isChess = false;
 
   // local clock model
   let clock = { enabled: false, remaining: [], turn: 0, running: false, incMs: 0, limitMs: 0 };
@@ -33,12 +39,26 @@ export function GameView(roomId) {
   const sideBottom = h('div', { class: 'game-side' });
   const clockEls = {};
 
-  const renderer = new BoardRenderer(canvas, {
-    onMove: (r, c) => act({ type: 'move', r, c }),
-    onWall: (r, c, o) => act({ type: 'wall', r, c, o }),
-  });
+  let renderer = null;
 
-  /* ========================= Wall drag tray ========================= */
+  /** Build the renderer lazily once the game type is known (after join). */
+  function ensureRenderer() {
+    if (renderer) return;
+    if (isChess) {
+      renderer = new ChessBoardRenderer(canvas, {
+        onMove: (from, to, promo) => act({ type: 'move', from, to, promo }),
+      });
+      wallTray.style.display = 'none';
+    } else {
+      renderer = new BoardRenderer(canvas, {
+        onMove: (r, c) => act({ type: 'move', r, c }),
+        onWall: (r, c, o) => act({ type: 'wall', r, c, o }),
+      });
+    }
+    requestAnimationFrame(() => renderer._resize?.());
+  }
+
+  /* ========================= Wall drag tray (Quoridor only) ============= */
   const wallTray = h('div', { class: 'wall-tray inactive' });
   const wallTrayGrip = h('div', { class: 'wall-tray-grip', title: 'برای جابجایی بکش' });
   const wallTrayRow = h('div', { class: 'wall-tray-row' });
@@ -50,11 +70,9 @@ export function GameView(roomId) {
     piece.addEventListener('pointerdown', (e) => startWallDrag(e, o));
     return piece;
   }
-
   wallTrayRow.append(makeDragPiece('h'), makeDragPiece('v'));
   wallTray.append(wallTrayGrip, wallTrayRow);
 
-  /* --- Reposition the whole tray by dragging its grip --- */
   let trayDrag = null;
   wallTrayGrip.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -68,54 +86,39 @@ export function GameView(roomId) {
   function onTrayMove(e) {
     if (!trayDrag) return;
     const w = wallTray.offsetWidth, hgt = wallTray.offsetHeight;
-    let left = e.clientX - trayDrag.dx;
-    let top = e.clientY - trayDrag.dy;
-    // keep inside viewport
-    left = Math.max(6, Math.min(left, window.innerWidth - w - 6));
-    top = Math.max(6, Math.min(top, window.innerHeight - hgt - 6));
+    let left = Math.max(6, Math.min(e.clientX - trayDrag.dx, window.innerWidth - w - 6));
+    let top = Math.max(6, Math.min(e.clientY - trayDrag.dy, window.innerHeight - hgt - 6));
     wallTray.style.left = left + 'px';
     wallTray.style.top = top + 'px';
     wallTray.style.bottom = 'auto';
   }
-  function onTrayUp() {
-    trayDrag = null;
-    document.removeEventListener('pointermove', onTrayMove);
-  }
+  function onTrayUp() { trayDrag = null; document.removeEventListener('pointermove', onTrayMove); }
 
   let dragGhost = null;
   let dragO = null;
-
   function startWallDrag(e, o) {
-    if (!isMyTurnActive() || !state || state.wallsLeft[seat] <= 0) return;
+    if (isChess || !isMyTurnActive() || !state || state.wallsLeft[seat] <= 0) return;
     e.preventDefault();
     dragO = o;
     renderer.setMode('wall');
-
     const barCls = o === 'h' ? 'wall-piece-bar-h' : 'wall-piece-bar-v';
     dragGhost = h('div', { class: 'drag-ghost' }, h('div', { class: barCls }));
     document.body.appendChild(dragGhost);
     moveDragGhost(e.clientX, e.clientY);
-
     document.addEventListener('pointermove', onDragMove);
     document.addEventListener('pointerup', onDragEnd, { once: true });
   }
-
-  function moveDragGhost(cx, cy) {
-    if (dragGhost) { dragGhost.style.left = cx + 'px'; dragGhost.style.top = cy + 'px'; }
-  }
-
+  function moveDragGhost(cx, cy) { if (dragGhost) { dragGhost.style.left = cx + 'px'; dragGhost.style.top = cy + 'px'; } }
   function canvasRelative(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     return { mx: clientX - rect.left, my: clientY - rect.top, inCanvas: clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom };
   }
-
   function onDragMove(e) {
     moveDragGhost(e.clientX, e.clientY);
     const { mx, my, inCanvas } = canvasRelative(e.clientX, e.clientY);
     if (inCanvas) renderer.previewDraggedWall(mx, my, dragO);
     else renderer.clearWallPreview();
   }
-
   function onDragEnd(e) {
     document.removeEventListener('pointermove', onDragMove);
     const { mx, my, inCanvas } = canvasRelative(e.clientX, e.clientY);
@@ -127,29 +130,24 @@ export function GameView(roomId) {
     renderer.setMode('move');
     renderer.clearWallPreview();
   }
-
   function updateWallTray() {
+    if (isChess) { wallTray.classList.add('inactive'); return; }
     const active = isMyTurnActive() && state?.wallsLeft[seat] > 0;
     wallTray.classList.toggle('inactive', !active);
   }
 
   function isMyTurnActive() {
-    return !spectator && status === 'active' && state?.winner === null &&
-      state?.turn === seat && !state?.eliminated?.[seat];
+    if (spectator || status !== 'active' || !state) return false;
+    const over = isChess ? state.gameOver : (state.winner !== null && state.winner !== undefined);
+    return !over && state.turn === seat && !state.eliminated?.[seat];
   }
 
   /* ========================= Voice chat ========================= */
   const voice = new VoiceChat(socket);
   const voiceMount = h('div', {});
-
-  voice.onUpdate = (event) => {
-    if (event === 'denied') toast('درخواست صدا رد شد', 'error');
-    renderVoicePanel();
-  };
+  voice.onUpdate = (event) => { if (event === 'denied') toast('درخواست صدا رد شد', 'error'); renderVoicePanel(); };
   voice.onSpectatorRequest = ({ socketId, name }) => {
-    if (!voice.active) return;
-    // Only players in voice chat get to vote
-    if (seat < 0) return;
+    if (!voice.active || seat < 0) return;
     modal({
       title: '🎙 درخواست ویس چت',
       body: h('p', { class: 'muted' }, `«${name}» (تماشاگر) می‌خواهد به صدا ملحق شود.`),
@@ -162,73 +160,43 @@ export function GameView(roomId) {
 
   function renderVoicePanel() {
     clear(voiceMount);
-    const card = h('div', { class: 'card' },
-      h('div', { class: 'card-title' }, '🎙 صدا'),
-    );
+    const card = h('div', { class: 'card' }, h('div', { class: 'card-title' }, '🎙 صدا'));
     const panel = h('div', { class: 'voice-panel' });
-
     if (voice.active) {
-      // Self entry (always first)
-      const selfEl = h('div', { class: 'voice-participant' },
+      panel.append(h('div', { class: 'voice-participant' },
         h('div', { class: `vc-dot ${voice.muted ? 'muted' : 'on'}` }),
         h('div', { class: 'vc-name' }, (store.me?.username || 'من') + ' (تو)'),
-        h('button', { class: 'btn btn-sm', onclick: () => { voice.toggleMute(); } },
-          voice.muted ? '🔇 آنمیوت' : '🎙 میوت'),
-      );
-      panel.append(selfEl);
-
-      for (const [sid, p] of voice.participants) {
-        panel.append(h('div', { class: 'voice-participant' },
-          h('div', { class: 'vc-dot on' }),
-          h('div', { class: 'vc-name' }, p.name),
-        ));
+        h('button', { class: 'btn btn-sm', onclick: () => { voice.toggleMute(); } }, voice.muted ? '🔇 آنمیوت' : '🎙 میوت')));
+      for (const [, p] of voice.participants) {
+        panel.append(h('div', { class: 'voice-participant' }, h('div', { class: 'vc-dot on' }), h('div', { class: 'vc-name' }, p.name)));
       }
-
-      card.append(panel,
-        h('button', {
-          class: 'btn btn-sm btn-danger btn-block', style: 'margin-top:12px',
-          onclick: () => { voice.leave(); renderVoicePanel(); },
-        }, '📵 خروج از صدا'),
-      );
+      card.append(panel, h('button', { class: 'btn btn-sm btn-danger btn-block', style: 'margin-top:12px',
+        onclick: () => { voice.leave(); renderVoicePanel(); } }, '📵 خروج از صدا'));
     } else {
-      const joinBtn = h('button', {
-        class: 'btn btn-sm btn-block', style: 'margin-top:0',
-        onclick: async () => {
-          joinBtn.disabled = true;
-          try { await voice.join(); }
-          catch { toast('دسترسی به میکروفون رد شد', 'error'); }
-          joinBtn.disabled = false;
-        },
-      }, '🎙 ورود به صدا');
-
+      const joinBtn = h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:0',
+        onclick: async () => { joinBtn.disabled = true; try { await voice.join(); } catch { toast('دسترسی به میکروفون رد شد', 'error'); } joinBtn.disabled = false; } }, '🎙 ورود به صدا');
       if (spectator) {
-        card.append(
-          h('p', { class: 'faint', style: 'margin-bottom:8px' }, 'درخواست پیوستن به ویس چت:'),
-          h('button', {
-            class: 'btn btn-sm btn-block',
-            onclick: () => { voice.requestSpectatorAccess(); toast('درخواست فرستاده شد…'); },
-          }, '🙋 درخواست صدا'),
-        );
-      } else {
-        card.append(joinBtn);
-      }
+        card.append(h('p', { class: 'faint', style: 'margin-bottom:8px' }, 'درخواست پیوستن به ویس چت:'),
+          h('button', { class: 'btn btn-sm btn-block', onclick: () => { voice.requestSpectatorAccess(); toast('درخواست فرستاده شد…'); } }, '🙋 درخواست صدا'));
+      } else card.append(joinBtn);
     }
-
     voiceMount.append(card);
   }
 
   /* ========================= Core rendering ========================= */
-
   function act(action) {
-    socket.emit('game:action', { action }, (res) => {
-      if (!res?.ok) toast(res?.error || 'حرکت نامعتبر', 'error');
-    });
+    socket.emit('game:action', { action }, (res) => { if (!res?.ok) toast(res?.error || 'حرکت نامعتبر', 'error'); });
   }
-  function seatColor(s) { return (config?.colors && config.colors[s]) || ['#36c6ff', '#ff6b6b', '#ffd36b', '#9b8cff'][s]; }
+  function seatColor(s) {
+    if (config?.colors && config.colors[s]) return config.colors[s];
+    return (isChess ? ['#f3f1ea', '#2b2b30', '#e8b730', '#3bb15f'] : ['#36c6ff', '#ff6b6b', '#ffd36b', '#9b8cff'])[s];
+  }
 
   function syncRenderer() {
     if (!state) return;
-    renderer.setConfig({ theme: config.theme, colors: config.colors || [config.p0Color, config.p1Color, '#ffd36b', '#9b8cff'] });
+    ensureRenderer();
+    if (isChess) renderer.setConfig({ boardTheme: config.boardTheme, colors: config.colors });
+    else renderer.setConfig({ theme: config.theme, colors: config.colors || [config.p0Color, config.p1Color, '#ffd36b', '#9b8cff'] });
     renderer.setMySeat(seat);
     renderer.setState(state);
     const myTurn = isMyTurnActive();
@@ -239,19 +207,33 @@ export function GameView(roomId) {
     updateWallTray();
   }
 
+  function gameIsOver() { return isChess ? !!state?.gameOver : (state?.winner !== null && state?.winner !== undefined); }
+
   function updateBanner(myTurn) {
     clear(turnBanner);
     if (status === 'waiting') { turnBanner.append('⏳ در انتظار حریف…'); return; }
-    if (state.winner !== null && state.winner !== undefined) {
-      const wname = players[state.winner]?.name || `بازیکن ${SEAT_LABELS[state.winner]}`;
-      turnBanner.append(h('span', { class: 'dot', style: `color:${seatColor(state.winner)}` }), `🏆 ${wname} برنده شد`);
+    if (gameIsOver()) {
+      if (isChess && state.draw) { turnBanner.append('🤝 بازی مساوی شد'); return; }
+      const w = state.winner;
+      if (w === null || w === undefined) { turnBanner.append('پایان بازی'); return; }
+      const wname = isChess && config.teams ? TEAM_NAMES[w % 2] : (players[w]?.name || `بازیکن ${SEAT_LABELS[w]}`);
+      turnBanner.append(h('span', { class: 'dot', style: `color:${seatColor(w)}` }), `🏆 ${wname} برنده شد`);
       return;
     }
+    const inChk = isChess && state.inCheck?.[state.turn];
     const turnName = players[state.turn]?.name || `بازیکن ${SEAT_LABELS[state.turn]}`;
     turnBanner.append(
       h('span', { class: 'dot', style: `color:${seatColor(state.turn)}` }),
       myTurn ? '✦ نوبت توست' : `نوبت ${turnName}`,
+      inChk ? h('span', { class: 'check-badge' }, ' کیش!') : null,
     );
+  }
+
+  function chessMaterial(s) {
+    let v = 0;
+    if (!state?.board) return 0;
+    for (const p of state.board) if (p && p.seat === s) v += PIECE_VALUE[p.t] || 0;
+    return v;
   }
 
   function renderPlayerCards() {
@@ -260,10 +242,8 @@ export function GameView(roomId) {
     for (let s = 0; s < numPlayers; s++) {
       const p = players[s];
       const isEliminated = state.eliminated?.[s];
-      const isTurn = status === 'active' && state.winner === null && state.turn === s && !isEliminated;
-      const wallsLeft = state.wallsLeft[s];
-      const dots = h('div', { class: 'walls-dots' });
-      for (let i = 0; i < state.wallsEach; i++) dots.append(h('i', { class: i < wallsLeft ? '' : 'used' }));
+      const isTurn = status === 'active' && !gameIsOver() && state.turn === s && !isEliminated;
+      const inChk = isChess && state.inCheck?.[s];
 
       let clockEl = null;
       if (clock.enabled) {
@@ -272,14 +252,28 @@ export function GameView(roomId) {
         clockEls[s] = clockEl;
       }
 
+      let detail;
+      if (isChess) {
+        const mat = chessMaterial(s);
+        detail = h('div', {},
+          h('div', { class: 'pc-walls' }, `♟ ارزش: ${faNum(mat)}`),
+          inChk ? h('span', { class: 'badge badge-check' }, 'کیش') : null,
+          config.teams ? h('span', { class: 'faint', style: 'margin-inline-start:6px' }, TEAM_NAMES[s % 2]) : null,
+        );
+      } else {
+        const wallsLeft = state.wallsLeft[s];
+        const dots = h('div', { class: 'walls-dots' });
+        for (let i = 0; i < state.wallsEach; i++) dots.append(h('i', { class: i < wallsLeft ? '' : 'used' }));
+        detail = h('div', {}, h('div', { class: 'pc-walls' }, `🧱 ${faNum(wallsLeft)} دیوار`), dots);
+      }
+
       playerCardsMount.append(h('div', { class: 'player-card' + (isTurn ? ' turn' : '') + (isEliminated ? ' eliminated' : '') },
         h('div', { class: 'pc-avatar', style: `background:${seatColor(s)}` }, p ? initials(p.name) : SEAT_LABELS[s]),
         h('div', { style: 'flex:1;min-width:0' },
           h('div', { class: 'pc-name' }, p ? p.name : `بازیکن ${SEAT_LABELS[s]}`,
             s === seat ? h('span', { class: 'faint' }, ' (تو)') : null,
             p && p.connected === false && !p.isAI ? h('span', { class: 'badge badge-ban', style: 'margin-inline-start:6px' }, 'قطع') : null),
-          h('div', { class: 'pc-walls' }, `🧱 ${faNum(wallsLeft)} دیوار`),
-          dots,
+          detail,
         ),
         clockEl,
       ));
@@ -310,23 +304,26 @@ export function GameView(roomId) {
       return;
     }
     if (status === 'active') {
-      controlsMount.append(h('div', { class: 'card' },
+      const hint = isChess
+        ? 'مهرهٔ خود را انتخاب کن و روی خانهٔ مقصد بزن.'
+        : '🚶 روی نقطه کلیک کن تا حرکت کنی.\n🧱 دیوار را از پایین صفحه به روی تخته بکش.';
+      const card = h('div', { class: 'card' },
         h('div', { class: 'card-title' }, 'کنترل نوبت'),
-        h('p', { class: 'hint-line', style: 'margin-bottom:10px' },
-          '🚶 روی نقطه کلیک کن تا حرکت کنی.\n🧱 دیوار را از پایین صفحه به روی تخته بکش.'),
-        state.wallsLeft[seat] <= 0 ? h('p', { class: 'faint' }, 'دیوارهایت تمام شده است.') : null,
-        h('button', { class: 'btn btn-danger btn-sm btn-block', style: 'margin-top:14px', onclick: doResign }, '🏳 تسلیم'),
-      ));
+        h('p', { class: 'hint-line', style: 'margin-bottom:10px' }, hint),
+      );
+      if (!isChess && state.wallsLeft[seat] <= 0) card.append(h('p', { class: 'faint' }, 'دیوارهایت تمام شده است.'));
+      if (isChess && numPlayers === 2) {
+        card.append(h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:6px', onclick: offerDraw }, '🤝 پیشنهاد مساوی'));
+      }
+      card.append(h('button', { class: 'btn btn-danger btn-sm btn-block', style: 'margin-top:10px', onclick: doResign }, '🏳 تسلیم'));
+      controlsMount.append(card);
     }
   }
 
   /* ========================= Chess clock ========================= */
   function setClock(cv) {
     if (!cv) return;
-    clock = {
-      enabled: cv.enabled, remaining: [...(cv.remaining || [])], turn: cv.turn,
-      running: cv.running, incMs: cv.incMs || 0, limitMs: cv.limitMs || 0,
-    };
+    clock = { enabled: cv.enabled, remaining: [...(cv.remaining || [])], turn: cv.turn, running: cv.running, incMs: cv.incMs || 0, limitMs: cv.limitMs || 0 };
     clockLocalStart = performance.now();
     paintClocks();
   }
@@ -356,19 +353,19 @@ export function GameView(roomId) {
     toast(ok ? 'لینک دعوت کپی شد' : 'کپی نشد — دستی انتخاب کن', ok ? 'success' : 'error');
   }
   async function doResign() {
-    if (await confirmDialog('تسلیم شدن', 'مطمئنی می‌خواهی تسلیم شوی؟', { danger: true, confirmLabel: 'تسلیم' })) {
-      socket.emit('game:resign');
-    }
+    if (await confirmDialog('تسلیم شدن', 'مطمئنی می‌خواهی تسلیم شوی؟', { danger: true, confirmLabel: 'تسلیم' })) socket.emit('game:resign');
+  }
+  function offerDraw() {
+    socket.emit('game:drawOffer', () => {});
+    toast('پیشنهاد مساوی فرستاده شد');
   }
 
   /* ========================= Chat ========================= */
   function addChat({ from, text, seat: fromSeat }) {
-    chatLog.append(h('div', { class: 'chat-msg' + (fromSeat === seat ? ' me' : '') },
-      h('span', { class: 'who' }, from), text));
+    chatLog.append(h('div', { class: 'chat-msg' + (fromSeat === seat ? ' me' : '') }, h('span', { class: 'who' }, from), text));
     chatLog.scrollTop = chatLog.scrollHeight;
   }
-  const chatInput = h('input', { class: 'input', placeholder: 'پیام…', maxlength: 240,
-    onkeydown: (e) => { if (e.key === 'Enter') sendChat(); } });
+  const chatInput = h('input', { class: 'input', placeholder: 'پیام…', maxlength: 240, onkeydown: (e) => { if (e.key === 'Enter') sendChat(); } });
   function sendChat() {
     const text = chatInput.value.trim(); if (!text) return;
     socket.emit('chat:message', { text }); chatInput.value = '';
@@ -379,6 +376,8 @@ export function GameView(roomId) {
     config = v.config; state = v.state; players = v.players;
     numPlayers = v.numPlayers || v.players?.length || 2;
     aiSeats = v.aiSeats || []; status = v.status; code = v.code;
+    gameType = v.gameType || config?.gameType || 'quoridor';
+    isChess = gameType === 'chess' || gameType === 'chess4';
     if (v.clock) setClock(v.clock);
     syncRenderer();
   }
@@ -395,6 +394,7 @@ export function GameView(roomId) {
       const why = reason === 'timeout' ? 'زمانش تمام شد'
         : reason === 'idle' ? 'به‌خاطر بی‌حرکتی حذف شد'
         : reason === 'resign' ? 'تسلیم شد'
+        : reason === 'checkmate' ? 'کیش‌ومات شد'
         : 'بازی را ترک کرد';
       toast(`${players[s]?.name || 'بازیکن'} ${why}`, 'error');
       syncRenderer();
@@ -402,34 +402,58 @@ export function GameView(roomId) {
     'spectator:update': () => {},
     'chat:message': (m) => addChat(m),
     'game:rematchVote': ({ votes }) => toast(`درخواست بازی مجدد (${faNum(votes.length)})`),
+    'game:drawOffer': ({ name }) => {
+      modal({
+        title: '🤝 پیشنهاد مساوی',
+        body: h('p', { class: 'muted' }, `«${name}» به تو پیشنهاد مساوی داده است.`),
+        actions: [
+          { label: 'رد', class: 'btn-ghost', onClick: () => socket.emit('game:drawRespond', { accept: false }) },
+          { label: 'قبول مساوی', class: 'btn-primary', onClick: () => socket.emit('game:drawRespond', { accept: true }) },
+        ],
+      });
+    },
+    'game:drawDeclined': () => toast('پیشنهاد مساوی رد شد', 'error'),
     'game:error': ({ error }) => toast(error, 'error'),
     'game:over': (data) => { state = data.state; status = 'finished'; if (data.clock) setClock({ ...data.clock, running: false }); syncRenderer(); showGameOver(data); },
   };
   for (const [ev, fn] of Object.entries(handlers)) socket.on(ev, fn);
 
   function showGameOver(data) {
-    const iWon = data.winner === seat;
+    const iWon = data.winner === seat || (config?.teams && data.winner != null && data.winner % 2 === seat % 2);
+    let title, headline;
+    if (data.draw) { title = '🤝 مساوی'; headline = drawReasonText(data.reason); }
+    else if (config?.teams && data.winner != null) {
+      title = iWon ? '🏆 تیم تو برد!' : 'پایان بازی';
+      headline = `${TEAM_NAMES[data.winner % 2]} برندهٔ بازی شد.`;
+    } else {
+      title = spectator ? 'پایان بازی' : (iWon ? '🏆 بردی!' : 'پایان بازی');
+      headline = `${data.winnerName || ('بازیکن ' + SEAT_LABELS[data.winner])} برندهٔ بازی شد.`;
+      if (isChess && data.reason === 'checkmate') headline += ' (کیش‌ومات)';
+    }
     let eloLine = '';
     if (data.elo) {
       const me = [data.elo.winner, data.elo.loser].find((x) => x.id === store.me?.id);
-      if (me) {
-        const diff = me.after - me.before;
-        eloLine = `امتیاز ELO: ${faNum(me.before)} → ${faNum(me.after)} (${diff >= 0 ? '+' : ''}${faNum(diff)})`;
-      }
+      if (me) { const diff = me.after - me.before; eloLine = `امتیاز ELO: ${faNum(me.before)} → ${faNum(me.after)} (${diff >= 0 ? '+' : ''}${faNum(diff)})`; }
     }
     const canRematch = !spectator && (aiSeats.length > 0 || players.filter((p) => p && !p.isAI).length >= 1);
     modal({
-      title: spectator ? 'پایان بازی' : (iWon ? '🏆 بردی!' : 'پایان بازی'),
+      title,
       body: h('div', { class: 'center' },
-        h('p', { style: 'font-size:1.1rem;margin-bottom:6px' },
-          `${data.winnerName || ('بازیکن ' + SEAT_LABELS[data.winner])} برندهٔ بازی شد.`),
-        eloLine ? h('p', { class: 'muted' }, eloLine) : null,
-      ),
+        h('p', { style: 'font-size:1.1rem;margin-bottom:6px' }, headline),
+        eloLine ? h('p', { class: 'muted' }, eloLine) : null),
       actions: [
         { label: 'بازگشت به سالن', class: 'btn-ghost', onClick: () => navigate('/lobby') },
         ...(canRematch ? [{ label: '🔄 بازی مجدد', class: 'btn-primary', onClick: () => { socket.emit('game:rematch'); return true; } }] : []),
       ],
     });
+  }
+  function drawReasonText(reason) {
+    return reason === 'stalemate' ? 'پات (بدون حرکت مجاز و بدون کیش).'
+      : reason === 'fifty' ? 'قانون ۵۰ حرکت.'
+      : reason === 'threefold' ? 'تکرار سه‌بارهٔ وضعیت.'
+      : reason === 'insufficient' ? 'مهره‌های ناکافی برای مات.'
+      : reason === 'draw-agreed' ? 'هر دو بازیکن مساوی را پذیرفتند.'
+      : 'بازی مساوی شد.';
   }
 
   /* ========================= Join ========================= */
@@ -449,9 +473,7 @@ export function GameView(roomId) {
     h('div', { class: 'card' },
       h('div', { class: 'card-title' }, '💬 گفتگو'),
       h('div', { class: 'chat-box' }, chatLog,
-        h('div', { class: 'chat-input' }, chatInput,
-          h('button', { class: 'btn btn-sm', onclick: sendChat }, 'ارسال'))),
-    ),
+        h('div', { class: 'chat-input' }, chatInput, h('button', { class: 'btn btn-sm', onclick: sendChat }, 'ارسال')))),
     voiceMount,
   );
 
@@ -472,10 +494,10 @@ export function GameView(roomId) {
     dragGhost?.remove();
     document.removeEventListener('pointermove', onDragMove);
     document.removeEventListener('pointermove', onTrayMove);
+    renderer?.destroy?.();
     voice.destroy();
     socket.emit('room:leave');
   });
 
-  requestAnimationFrame(() => renderer._resize());
   return view;
 }

@@ -7,9 +7,20 @@
  */
 import { customAlphabet } from 'nanoid';
 import { QuoridorGame } from './engine.js';
+import { ChessGame } from './chess.js';
 import { chooseAction } from './ai.js';
-import { Games, applyEloResult } from '../models.js';
+import { chooseChessAction } from './chessAI.js';
+import { Games, applyEloResult, applyEloDraw } from '../models.js';
 import db, { getSettings } from '../db.js';
+
+const GAME_TYPES = ['quoridor', 'chess', 'chess4'];
+
+/** Build the right rules engine for a (sanitized) game configuration. */
+function buildEngine(gameType, config) {
+  if (gameType === 'chess') return new ChessGame({ variant: '2' });
+  if (gameType === 'chess4') return new ChessGame({ variant: config.teams ? '4team' : '4' });
+  return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
+}
 
 const codeGen = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const idGen = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 12);
@@ -28,7 +39,35 @@ const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 // How long a disconnected player has to reconnect before being eliminated.
 const RECONNECT_GRACE_MS = 2 * 60 * 1000; // 2 minutes
 
+const CHESS_BOARD_THEMES = ['classic', 'green', 'blue', 'wood', 'gray', 'midnight'];
+const CHESS_COLORS_2 = ['#f3f1ea', '#2b2b30'];
+const CHESS_COLORS_4 = ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'];
+
+function sanitizeChessConfig(cfg, gameType) {
+  const colorRe = /^#[0-9a-fA-F]{6}$/;
+  const players = gameType === 'chess4' ? 4 : 2;
+  const defaults = players === 4 ? CHESS_COLORS_4 : CHESS_COLORS_2;
+  const incoming = Array.isArray(cfg.colors) ? cfg.colors : [];
+  const colors = [];
+  for (let i = 0; i < players; i++) colors.push(colorRe.test(incoming[i]) ? incoming[i] : defaults[i]);
+
+  const boardTheme = CHESS_BOARD_THEMES.includes(cfg.boardTheme) ? cfg.boardTheme : 'classic';
+  const timeLimit = TIME_LIMITS.includes(parseInt(cfg.timeLimit, 10)) ? parseInt(cfg.timeLimit, 10) : 0;
+  const timeIncrement = TIME_INCREMENTS.includes(parseInt(cfg.timeIncrement, 10)) ? parseInt(cfg.timeIncrement, 10) : 0;
+  const teams = gameType === 'chess4' ? !!cfg.teams : false;
+
+  return {
+    gameType, players, colors, boardTheme, teams,
+    p0Color: colors[0], p1Color: colors[1],
+    timeLimit, timeIncrement,
+    ranked: gameType === 'chess' ? !!cfg.ranked : false,
+  };
+}
+
 function sanitizeConfig(cfg = {}) {
+  const gameType = GAME_TYPES.includes(cfg.gameType) ? cfg.gameType : 'quoridor';
+  if (gameType === 'chess' || gameType === 'chess4') return sanitizeChessConfig(cfg, gameType);
+
   const s = getSettings();
   let size = parseInt(cfg.size, 10);
   if (!VALID_SIZES.includes(size)) size = parseInt(s.default_board_size, 10) || 9;
@@ -57,6 +96,7 @@ function sanitizeConfig(cfg = {}) {
   const timeIncrement = TIME_INCREMENTS.includes(parseInt(cfg.timeIncrement, 10)) ? parseInt(cfg.timeIncrement, 10) : 0;
 
   return {
+    gameType: 'quoridor',
     size, players, walls, theme, colors,
     p0Color: colors[0], p1Color: colors[1],
     timeLimit, timeIncrement,
@@ -70,8 +110,9 @@ class Room {
     this.mode = mode; // private|random|ai
     this.code = code;
     this.config = config;
+    this.gameType = config.gameType || 'quoridor';
     this.numPlayers = config.players;
-    this.game = new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
+    this.game = buildEngine(this.gameType, config);
     this.players = new Array(this.numPlayers).fill(null);
     this.spectators = new Set();
     this.status = 'waiting'; // waiting|active|finished|aborted
@@ -106,6 +147,7 @@ class Room {
     return {
       id: this.id,
       mode: this.mode,
+      gameType: this.gameType,
       code: this.code,
       config: this.config,
       numPlayers: this.numPlayers,
@@ -127,7 +169,7 @@ class Room {
       incMs: this.clock.incMs,
       remaining: [...this.clock.remaining],
       turn: this.game.turn,
-      running: this.status === 'active' && this.game.winner === null,
+      running: this.status === 'active' && !this.game.isOver(),
       serverNow: Date.now(),
       turnStart: this.clock.turnStart,
     };
@@ -239,7 +281,7 @@ export class GameManager {
 
   scheduleFlag(room) {
     if (room.clock.timer) { clearTimeout(room.clock.timer); room.clock.timer = null; }
-    if (!room.clock.enabled || room.status !== 'active' || room.game.winner !== null) return;
+    if (!room.clock.enabled || room.status !== 'active' || room.game.isOver()) return;
     const seat = room.game.turn;
     const remaining = room.clock.remaining[seat];
     room.clock.timer = setTimeout(() => this.onFlag(room, seat), Math.max(0, remaining));
@@ -255,7 +297,7 @@ export class GameManager {
   }
 
   onFlag(room, seat) {
-    if (room.status !== 'active' || room.game.winner !== null) return;
+    if (room.status !== 'active' || room.game.isOver()) return;
     if (room.game.turn !== seat || room.game.eliminated[seat]) return;
     room.clock.remaining[seat] = 0;
     this.playerOut(room, seat, 'timeout');
@@ -266,7 +308,7 @@ export class GameManager {
   /** (Re)start the per-turn inactivity timer for the player who must move. */
   resetIdleTimer(room) {
     this.clearIdleTimer(room);
-    if (room.status !== 'active' || room.game.winner !== null) return;
+    if (room.status !== 'active' || room.game.isOver()) return;
     const seat = room.game.turn;
     // AI seats move on their own; no idle expiry for them.
     if (room.aiSeats.has(seat)) return;
@@ -278,7 +320,7 @@ export class GameManager {
   }
 
   onIdle(room, seat) {
-    if (room.status !== 'active' || room.game.winner !== null) return;
+    if (room.status !== 'active' || room.game.isOver()) return;
     if (room.game.turn !== seat || room.game.eliminated[seat]) return;
     // Idle player forfeits this turn. In 2-player the engine ends the game
     // (opponent wins); in 4-player they are removed and play continues.
@@ -297,8 +339,8 @@ export class GameManager {
       state: result.state,
       turn: result.state.turn,
     });
-    if (result.winner !== null) {
-      this.finishGame(room, result.winner);
+    if (room.game.isOver()) {
+      this.finishGame(room, room.game.winner);
     } else {
       this.scheduleFlag(room);
       this.resetIdleTimer(room);
@@ -308,12 +350,18 @@ export class GameManager {
     return result;
   }
 
+  /** Dispatch to the right AI for this room's game type. */
+  pickAIAction(room, seat) {
+    if (room.gameType === 'quoridor') return chooseAction(room.game, seat, room.aiDifficulty);
+    return chooseChessAction(room.game, seat, room.aiDifficulty);
+  }
+
   /** Remove a player from a live game (resign / timeout / abandon). */
   playerOut(room, seat, reason = 'resign') {
     if (room.status !== 'active') return;
     const over = room.game.eliminate(seat);
     this.broadcast(room, 'player:eliminated', { seat, reason, state: room.game.toState() });
-    if (over || room.game.winner !== null) {
+    if (over || room.game.isOver()) {
       this.finishGame(room, room.game.winner);
     } else {
       this.scheduleFlag(room);
@@ -330,7 +378,7 @@ export class GameManager {
     setTimeout(() => {
       if (room.status !== 'active' || room.game.turn !== seat) return;
       try {
-        const action = chooseAction(room.game, seat, room.aiDifficulty);
+        const action = this.pickAIAction(room, seat);
         if (action) this.applyAction(room, seat, action);
       } catch { /* ignore AI errors */ }
     }, 550 + Math.random() * 500);
@@ -342,11 +390,18 @@ export class GameManager {
     if (room.clock.timer) { clearTimeout(room.clock.timer); room.clock.timer = null; }
     this.clearIdleTimer(room);
 
+    const isDraw = winnerSeat == null && room.game.draw === true;
     const winnerPlayer = winnerSeat == null ? null : room.players[winnerSeat];
+    const endReason = room.game.endReason || null;
+
     let eloResult = null;
     if (room.numPlayers === 2 && room.config.ranked) {
-      const loserPlayer = room.players[1 - winnerSeat];
-      if (winnerPlayer?.userId && loserPlayer?.userId && !winnerPlayer.isAI && !loserPlayer.isAI) {
+      const p0 = room.players[0], p1 = room.players[1];
+      const bothRated = p0?.userId && p1?.userId && !p0.isAI && !p1.isAI;
+      if (bothRated && isDraw) {
+        eloResult = applyEloDraw(p0.userId, p1.userId);
+      } else if (bothRated && winnerPlayer) {
+        const loserPlayer = room.players[1 - winnerSeat];
         eloResult = applyEloResult(winnerPlayer.userId, loserPlayer.userId);
       }
     }
@@ -359,10 +414,32 @@ export class GameManager {
     this.broadcast(room, 'game:over', {
       winner: winnerSeat,
       winnerName: winnerPlayer?.name ?? null,
+      winningTeam: room.game.winningTeam ?? null,
+      draw: isDraw,
+      reason: endReason,
       elo: eloResult,
       clock: room.clockView(),
       state: room.game.toState(),
     });
+  }
+
+  /** Reset a finished room for a rematch (engine + clocks), keeping seats. */
+  rematchReset(room) {
+    room.game = buildEngine(room.gameType, room.config);
+    room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
+    room.status = 'active';
+    room.rematchVotes.clear();
+    this.startClock(room);
+    this.resetIdleTimer(room);
+    this.broadcast(room, 'game:start', room.publicView());
+    this.maybeRunAI(room);
+  }
+
+  /** Offer / accept a draw (2-player only). */
+  acceptDraw(room) {
+    if (room.status !== 'active' || room.numPlayers !== 2) return;
+    room.game.agreeDraw?.();
+    this.finishGame(room, null);
   }
 
   resign(room, seat) {
@@ -376,8 +453,9 @@ export class GameManager {
     this.dequeue(socket.id);
     const cfg = sanitizeConfig(config);
     const compatible = (q) =>
+      q.config.gameType === cfg.gameType && q.config.players === cfg.players &&
       q.config.size === cfg.size && q.config.walls === cfg.walls &&
-      q.config.players === cfg.players && q.config.ranked === cfg.ranked &&
+      !!q.config.teams === !!cfg.teams && q.config.ranked === cfg.ranked &&
       q.config.timeLimit === cfg.timeLimit && q.socketId !== socket.id;
 
     // Gather enough players (2 or 4) before creating a room.
@@ -460,7 +538,7 @@ export class GameManager {
     socket.data.seat = seat;
     this.broadcast(room, 'player:reconnect', { seat });
     // Resume idle timer if it's their turn (was paused on disconnect).
-    if (room.status === 'active' && room.game.winner === null &&
+    if (room.status === 'active' && !room.game.isOver() &&
         room.game.turn === seat && !room.game.eliminated[seat]) {
       this.resetIdleTimer(room);
     }
@@ -511,8 +589,10 @@ export class GameManager {
       out.push({
         id: r.id,
         mode: r.mode,
+        gameType: r.gameType,
+        teams: !!r.config.teams,
         numPlayers: r.numPlayers,
-        size: r.config.size,
+        size: r.config.size || null,
         moveCount: r.game.moveCount,
         spectators: r.spectators.size,
         clock: r.clock.enabled,

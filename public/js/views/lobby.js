@@ -1,10 +1,18 @@
-/* اَلِ من خورا — Lobby: choose a mode, customize, and start playing */
+/* اَلِ من خورا — Lobby: choose a game, a mode, customize, and start playing */
 import { h, store, toast, modal, faNum, $ } from '../core.js';
-import { GameCustomizer } from '../components.js';
+import { makeCustomizer } from '../components.js';
 import { getSocket, navigate } from '../app.js';
+
+const GAMES = [
+  { id: 'quoridor', icon: '🧱', name: 'اَلِ من خورا', desc: 'حرکت کن یا دیوار بساز' },
+  { id: 'chess', icon: '♛', name: 'شطرنج', desc: 'نبرد کلاسیک دو نفره' },
+  { id: 'chess4', icon: '♞', name: 'شطرنج ۴ نفره', desc: 'تخته صلیبی، ۴ ارتش' },
+];
+function gameLabel(id) { const g = GAMES.find((x) => x.id === id); return g ? `${g.icon} ${g.name}` : id; }
 
 export function LobbyView() {
   const socket = getSocket();
+  let gameType = 'quoridor';
   const statsPills = h('div', { class: 'stat-pills' });
 
   function refreshStats() {
@@ -46,23 +54,46 @@ export function LobbyView() {
         if (i) acc.push(h('span', { class: 'faint' }, '⚔'));
         acc.push(el); return acc;
       }, []);
+    const gt = g.gameType || 'quoridor';
+    const typeLabel = gt === 'chess' ? '♛ شطرنج'
+      : gt === 'chess4' ? (g.teams ? '♞ شطرنج ۴ تیمی' : '♞ شطرنج ۴ نفره')
+      : '🧱 اَلِ من خورا';
+    const meta = gt === 'quoridor'
+      ? `${typeLabel} · ${faNum(g.size)}×${faNum(g.size)} · ${faNum(g.moveCount)} حرکت`
+      : `${typeLabel} · ${faNum(g.moveCount)} حرکت`;
     return h('div', { class: 'live-card', onclick: () => navigate(`/game/${g.id}`) },
       h('div', { style: 'flex:1;min-width:0' },
         h('div', { class: 'live-players' }, ...names),
-        h('div', { class: 'faint' },
-          `${g.numPlayers === 4 ? '۴ نفره' : '۲ نفره'} · ${faNum(g.size)}×${faNum(g.size)} · ${faNum(g.moveCount)} حرکت`)),
+        h('div', { class: 'faint' }, meta)),
       h('div', { class: 'live-watch' },
         h('span', { class: 'pill' }, `👁 ${faNum(g.spectators)}`),
         h('button', { class: 'btn btn-sm' }, 'تماشا')),
     );
   }
 
+  // ---- Game picker ----
+  const gameSelect = h('div', { class: 'game-select' });
+  GAMES.forEach((g) => {
+    const tile = h('div', { class: 'game-tile' + (g.id === gameType ? ' active' : ''), dataset: { game: g.id },
+      onclick: () => {
+        gameType = g.id;
+        [...gameSelect.children].forEach((t) => t.classList.toggle('active', t.dataset.game === gameType));
+      } },
+      h('div', { class: 'gt-ico' }, g.icon),
+      h('div', { class: 'gt-name' }, g.name),
+      h('div', { class: 'gt-desc' }, g.desc));
+    gameSelect.append(tile);
+  });
+
   const view = h('div', { class: 'fade-in', dataset: { cleanup: '1' } },
     h('div', {},
       h('h1', { class: 'section-title' }, 'سالن بازی'),
-      h('p', { class: 'section-sub' }, `سلام ${store.displayName} 👋 — یک حالت بازی را انتخاب کن.`),
+      h('p', { class: 'section-sub' }, `سلام ${store.displayName} 👋 — اول بازی را انتخاب کن، بعد حالت را.`),
       statsPills,
     ),
+    h('div', { style: 'margin-top:22px' },
+      h('div', { class: 'card-title', style: 'margin-bottom:12px' }, '🎮 کدام بازی؟'),
+      gameSelect),
     h('div', { class: 'lobby-grid', style: 'margin-top:26px' },
       h('div', { class: 'mode-list' },
         modeCard('🎲', 'بازی تصادفی', 'با یک حریف هم‌سطح به‌صورت آنی همگام شو.', () => openRandom()),
@@ -90,13 +121,13 @@ export function LobbyView() {
   /* -------------------------- Mode handlers ----------------------------- */
 
   function customizerModal(title, primaryLabel, onStart, opts = {}) {
-    const customizer = GameCustomizer(opts);
+    const customizer = makeCustomizer(gameType, opts);
     modal({
-      title,
+      title: `${gameLabel(gameType)} — ${title}`,
       body: customizer.element,
       actions: [
         { label: 'انصراف', class: 'btn-ghost' },
-        { label: primaryLabel, class: 'btn-primary', onClick: () => { onStart(customizer.getConfig()); } },
+        { label: primaryLabel, class: 'btn-primary', onClick: () => { onStart({ ...customizer.getConfig(), gameType }); } },
       ],
     });
   }
@@ -106,12 +137,10 @@ export function LobbyView() {
   }
 
   function quickMatch() {
-    startQueue({
-      size: store.config?.defaultBoardSize || 9,
-      walls: store.config?.defaultWalls || 10,
-      theme: store.config?.defaultTheme || 'emerald',
-      ranked: !!store.isLoggedIn,
-    });
+    const base = gameType === 'quoridor'
+      ? { size: store.config?.defaultBoardSize || 9, walls: store.config?.defaultWalls || 10, theme: store.config?.defaultTheme || 'emerald', ranked: !!store.isLoggedIn }
+      : { ranked: gameType === 'chess' && !!store.isLoggedIn };
+    startQueue({ ...base, gameType });
   }
 
   function startQueue(config) {
@@ -140,7 +169,7 @@ export function LobbyView() {
   }
 
   function openAI() {
-    const customizer = GameCustomizer({ showRanked: false });
+    const customizer = makeCustomizer(gameType, { showRanked: false });
     let difficulty = store.config?.aiDifficulty || 'normal';
     const diffSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
     [['easy', 'آسان'], ['normal', 'متوسط'], ['hard', 'سخت']].forEach(([v, l]) => {
@@ -149,14 +178,14 @@ export function LobbyView() {
       diffSeg.append(b);
     });
     modal({
-      title: 'بازی با هوش مصنوعی',
+      title: `${gameLabel(gameType)} — بازی با هوش مصنوعی`,
       body: h('div', {},
         h('div', { class: 'opt-group' }, h('label', {}, 'سطح سختی'), diffSeg),
         customizer.element),
       actions: [
         { label: 'انصراف', class: 'btn-ghost' },
         { label: 'شروع', class: 'btn-primary', onClick: () => {
-          socket.emit('room:createAI', { config: customizer.getConfig(), difficulty }, (res) => {
+          socket.emit('room:createAI', { config: { ...customizer.getConfig(), gameType }, difficulty }, (res) => {
             if (!res?.ok) return toast(res?.error || 'خطا', 'error');
             navigate(`/game/${res.roomId}`);
           });

@@ -150,17 +150,36 @@ export function registerSocket(io, manager) {
       manager.broadcast(room, 'game:rematchVote', { votes: [...room.rematchVotes] });
       const needed = room.humanSeats().length; // every human must agree
       if (room.rematchVotes.size >= needed) {
-        // Reset the engine and clocks, keeping seats, colors and AI.
-        room.game = new (room.game.constructor)({
-          size: room.config.size, wallsEach: room.config.walls, players: room.numPlayers,
-        });
-        room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
-        room.status = 'active';
-        room.rematchVotes.clear();
-        manager.startClock(room);
-        manager.resetIdleTimer(room);
-        manager.broadcast(room, 'game:start', room.publicView());
-        manager.maybeRunAI(room);
+        manager.rematchReset(room); // rebuilds the right engine for this game type
+      }
+      cb?.({ ok: true });
+    });
+
+    /* --------------------------- Draw offers (2P) ------------------------ */
+    socket.on('game:drawOffer', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room || room.status !== 'active' || room.numPlayers !== 2) return cb?.({ ok: false });
+      const seat = room.seatOf(socket.id);
+      if (seat < 0) return cb?.({ ok: false });
+      room.drawOfferBy = seat;
+      const other = 1 - seat;
+      const target = room.players[other];
+      if (target?.socketId) {
+        io.to(target.socketId).emit('game:drawOffer', { from: seat, name: socket.data.identity.name });
+      }
+      cb?.({ ok: true });
+    });
+    socket.on('game:drawRespond', ({ accept } = {}, cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room || room.status !== 'active') return cb?.({ ok: false });
+      const seat = room.seatOf(socket.id);
+      if (seat < 0 || room.drawOfferBy == null || room.drawOfferBy === seat) return cb?.({ ok: false });
+      const offerer = room.drawOfferBy;
+      room.drawOfferBy = null;
+      if (accept) {
+        manager.acceptDraw(room);
+      } else if (room.players[offerer]?.socketId) {
+        io.to(room.players[offerer].socketId).emit('game:drawDeclined');
       }
       cb?.({ ok: true });
     });

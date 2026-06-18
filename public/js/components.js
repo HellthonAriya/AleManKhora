@@ -2,6 +2,16 @@
 import { h, PLAYER_COLORS, THEMES, store } from './core.js';
 import { BoardRenderer } from './board.js';
 import { QuoridorGame } from './engine.js';
+import { ChessBoardRenderer, BOARD_THEMES } from './chessboard.js';
+import { ChessGame } from './chess.js';
+
+const CHESS_SWATCHES = ['#f3f1ea', '#2b2b30', '#e7503a', '#3d7fe0', '#e8b730', '#3bb15f', '#9b8cff', '#36c6ff'];
+
+/** Pick the right customizer for a game type. Returns { element, getConfig }. */
+export function makeCustomizer(gameType, opts = {}) {
+  if (gameType === 'chess' || gameType === 'chess4') return ChessCustomizer({ gameType, ...opts });
+  return GameCustomizer(opts);
+}
 
 const TIME_OPTIONS = [
   { label: 'بدون زمان', value: 0 },
@@ -154,6 +164,115 @@ export function GameCustomizer({ showRanked = true, allowPlayers = true } = {}) 
       colors: [...cfg.colors.slice(0, cfg.players)],
       p0Color: cfg.colors[0], p1Color: cfg.colors[1],
     }),
+  };
+}
+
+/**
+ * Chess customizer: board theme, piece colors, time control, ranked flag and
+ * (for 4-player) free-for-all vs 2-vs-2 teams — with a live preview board.
+ */
+export function ChessCustomizer({ gameType = 'chess', showRanked = true } = {}) {
+  const is4 = gameType === 'chess4';
+  const cfg = {
+    gameType,
+    players: is4 ? 4 : 2,
+    teams: false,
+    boardTheme: 'classic',
+    colors: is4 ? ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'] : ['#f3f1ea', '#2b2b30'],
+    timeLimit: 0,
+    timeIncrement: 0,
+    ranked: !is4 && !!store.isLoggedIn,
+  };
+
+  const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
+  let renderer = null;
+  function refreshPreview() {
+    if (!renderer) renderer = new ChessBoardRenderer(previewCanvas);
+    const variant = is4 ? (cfg.teams ? '4team' : '4') : '2';
+    const g = new ChessGame({ variant });
+    renderer.setConfig({ boardTheme: cfg.boardTheme, colors: [...cfg.colors] });
+    renderer.setMySeat(0);
+    renderer.setState(g.toState(), { animate: false });
+  }
+
+  /* --- 4-player mode (FFA / teams) --- */
+  const modeSeg = is4 ? seg([
+    { label: 'هرکس برای خودش', value: false, active: true },
+    { label: 'تیمی ۲ در ۲', value: true, active: false },
+  ], (v) => { cfg.teams = v; refreshPreview(); }) : null;
+
+  /* --- board theme --- */
+  const themeRow = h('div', { class: 'theme-row' });
+  Object.keys(BOARD_THEMES).forEach((id) => {
+    const t = BOARD_THEMES[id];
+    themeRow.append(h('div', {
+      class: 'theme-chip' + (id === cfg.boardTheme ? ' active' : ''), title: id,
+      style: `background:linear-gradient(135deg,${t.light} 0 50%,${t.dark} 50% 100%)`,
+      onclick: () => {
+        cfg.boardTheme = id;
+        [...themeRow.children].forEach((c, i) => c.classList.toggle('active', Object.keys(BOARD_THEMES)[i] === cfg.boardTheme));
+        refreshPreview();
+      },
+    }));
+  });
+
+  /* --- piece colors --- */
+  const colorsMount = h('div', {});
+  function colorPick(idx) {
+    const wrap = h('div', { class: 'swatches' });
+    CHESS_SWATCHES.forEach((col) => {
+      wrap.append(h('div', {
+        class: 'swatch' + (col === cfg.colors[idx] ? ' active' : ''),
+        style: `background:${col}`,
+        onclick: () => { cfg.colors[idx] = col; [...wrap.children].forEach((c, i) => c.classList.toggle('active', CHESS_SWATCHES[i] === col)); pickInput.value = col; refreshPreview(); },
+      }));
+    });
+    const pickInput = h('input', { type: 'color', value: cfg.colors[idx],
+      oninput: (e) => { cfg.colors[idx] = e.target.value; [...wrap.children].forEach((c) => c.classList.remove('active')); refreshPreview(); } });
+    wrap.append(h('div', { class: 'color-pick' }, pickInput));
+    return wrap;
+  }
+  const seatNames4 = ['قرمز (پایین)', 'آبی (چپ)', 'زرد (بالا)', 'سبز (راست)'];
+  function rebuildColors() {
+    colorsMount.innerHTML = '';
+    for (let i = 0; i < cfg.players; i++) {
+      const label = is4 ? `رنگ ${seatNames4[i]}` : (i === 0 ? 'رنگ مهره‌های تو (سفید)' : 'رنگ مهره‌های حریف (سیاه)');
+      colorsMount.append(optGroup(label, colorPick(i)));
+    }
+  }
+  rebuildColors();
+
+  /* --- time control --- */
+  const timeSeg = seg(TIME_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeLimit })),
+    (v) => { cfg.timeLimit = v; incMount.style.display = v ? '' : 'none'; });
+  const incMount = h('div', { style: 'display:none' },
+    optGroup('پاداش زمانی هر حرکت', seg(INC_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeIncrement })),
+      (v) => { cfg.timeIncrement = v; })));
+
+  const rankedToggle = showRanked && !is4 && store.isLoggedIn ? h('label', { class: 'opt-group', style: 'display:flex;align-items:center;gap:10px;cursor:pointer' },
+    h('input', { type: 'checkbox', checked: cfg.ranked, onchange: (e) => { cfg.ranked = e.target.checked; } }),
+    h('span', {}, 'بازی رتبه‌دار — روی امتیاز ELO اثر دارد')) : null;
+
+  const leftCol = h('div', { style: 'flex:1.2' },
+    is4 ? optGroup('حالت بازی', modeSeg) : null,
+    optGroup('تم تخته', themeRow),
+    optGroup('کنترل زمان (تایمر شطرنجی)', timeSeg),
+    incMount,
+    colorsMount,
+    rankedToggle,
+  );
+
+  const element = h('div', { class: 'row', style: 'align-items:flex-start' },
+    leftCol,
+    h('div', { style: 'flex:1' },
+      h('label', { class: 'opt-group', style: 'display:block;color:var(--text-dim);font-size:.82rem;font-weight:700;margin-bottom:9px' }, 'پیش‌نمایش زنده'),
+      previewCanvas),
+  );
+
+  requestAnimationFrame(refreshPreview);
+  return {
+    element,
+    getConfig: () => ({ ...cfg, colors: [...cfg.colors.slice(0, cfg.players)] }),
   };
 }
 

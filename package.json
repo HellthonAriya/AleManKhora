@@ -1,7 +1,7 @@
 {
   "name": "alemankhora",
   "version": "1.0.0",
-  "description": "اِل من خورا — a complete online Quoridor-style strategy game (move or build a wall) with multiplayer, AI, leaderboard, invites and admin panel.",
+  "description": "اَلِ من خورا — a multi-game strategy platform: Quoridor-style play plus 2-player and 4-player chess, with realtime multiplayer, AI, leaderboard, invites, voice chat and an admin panel.",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
@@ -11,6 +11,8 @@
   },
   "keywords": [
     "quoridor",
+    "chess",
+    "4-player-chess",
     "game",
     "multiplayer",
     "websocket",

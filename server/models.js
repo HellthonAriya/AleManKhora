@@ -140,6 +140,32 @@ export function applyEloResult(winnerId, loserId) {
   };
 }
 
+/**
+ * Apply an ELO update for a drawn ranked game (each scores 0.5).
+ * Counts as a game played and a draw for both, with no win/loss.
+ */
+export function applyEloDraw(aId, bId) {
+  if (!aId || !bId) return null;
+  const a = db.prepare('SELECT * FROM users WHERE id = ?').get(aId);
+  const b = db.prepare('SELECT * FROM users WHERE id = ?').get(bId);
+  if (!a || !b) return null;
+  const K = 32;
+  const ea = expectedScore(a.elo, b.elo);
+  const eb = expectedScore(b.elo, a.elo);
+  const newA = Math.max(100, Math.round(a.elo + K * (0.5 - ea)));
+  const newB = Math.max(100, Math.round(b.elo + K * (0.5 - eb)));
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE users SET elo = ?, games_played = games_played + 1, draws = draws + 1 WHERE id = ?').run(newA, aId);
+    db.prepare('UPDATE users SET elo = ?, games_played = games_played + 1, draws = draws + 1 WHERE id = ?').run(newB, bId);
+  });
+  tx();
+  return {
+    winner: { id: aId, before: a.elo, after: newA },
+    loser: { id: bId, before: b.elo, after: newB },
+    draw: true,
+  };
+}
+
 /* -------------------------------- Games ----------------------------------- */
 
 export const Games = {
