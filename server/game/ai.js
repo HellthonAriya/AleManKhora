@@ -12,12 +12,15 @@
 import { QuoridorGame } from './engine.js';
 
 function evalFor(game, me) {
-  const opp = 1 - me;
   const myDist = game.shortestPath(me);
-  const oppDist = game.shortestPath(opp);
   if (!isFinite(myDist)) return -1e6;
+  // Closest active opponent's distance to their goal.
+  let oppDist = Infinity;
+  for (const p of game.activePlayers()) {
+    if (p === me) continue;
+    oppDist = Math.min(oppDist, game.shortestPath(p));
+  }
   if (!isFinite(oppDist)) return 1e6;
-  // Want my distance small, opponent distance large.
   return oppDist - myDist;
 }
 
@@ -39,7 +42,13 @@ function cloneApply(game, player, action) {
  * @returns {object} action
  */
 export function chooseAction(game, me, difficulty = 'normal') {
-  const opp = 1 - me;
+  // Nearest active opponent (used as the target for blocking walls).
+  let opp = -1; let oppBest = Infinity;
+  for (const p of game.activePlayers()) {
+    if (p === me) continue;
+    const d = game.shortestPath(p);
+    if (d < oppBest) { oppBest = d; opp = p; }
+  }
 
   // 1) Best pawn move by resulting evaluation.
   let bestMove = null;

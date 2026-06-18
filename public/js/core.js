@@ -28,6 +28,13 @@ const FA_DIGITS = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
 export function faNum(n) {
   return String(n).replace(/[0-9]/g, (d) => FA_DIGITS[+d]);
 }
+export function formatClock(ms) {
+  ms = Math.max(0, ms);
+  const total = Math.ceil(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return faNum(m) + ':' + faNum(String(s).padStart(2, '0'));
+}
 export function timeAgo(ts) {
   if (!ts) return '—';
   const s = Math.floor((Date.now() - ts) / 1000);

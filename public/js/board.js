@@ -26,7 +26,7 @@ export class BoardRenderer {
 
     this.state = null;
     this.engine = null;
-    this.config = { p0Color: '#36c6ff', p1Color: '#ff6b6b', theme: 'emerald' };
+    this.config = { colors: ['#36c6ff', '#ff6b6b', '#ffd36b', '#9b8cff'], theme: 'emerald' };
     this.mySeat = -1;
     this.mode = 'move';
     this.interactive = false;
@@ -44,7 +44,18 @@ export class BoardRenderer {
   }
 
   /* ------------------------------ Public API ----------------------------- */
-  setConfig(config) { this.config = { ...this.config, ...config }; this.draw(); }
+  setConfig(config) {
+    this.config = { ...this.config, ...config };
+    // Accept either a `colors` array or legacy p0/p1 color fields.
+    if (!Array.isArray(this.config.colors)) {
+      this.config.colors = [config.p0Color || '#36c6ff', config.p1Color || '#ff6b6b', '#ffd36b', '#9b8cff'];
+    }
+    this.draw();
+  }
+  _seatColor(s) {
+    return (this.config.colors && this.config.colors[s]) ||
+      ['#36c6ff', '#ff6b6b', '#ffd36b', '#9b8cff'][s] || '#36c6ff';
+  }
   setMySeat(seat) { this.mySeat = seat; this._recomputeLegal(); this.draw(); }
   setMode(mode) { this.mode = mode; this.hover = null; this._recomputeLegal(); this.draw(); }
   setInteractive(v) { this.interactive = v; this.canvas.style.cursor = v ? 'pointer' : 'default'; this.draw(); }
@@ -55,7 +66,7 @@ export class BoardRenderer {
     this.engine = QuoridorGame.fromState(state);
     // Detect a pawn move to animate.
     if (animate && prev && prev.pawns) {
-      for (let s = 0; s < 2; s++) {
+      for (let s = 0; s < state.pawns.length; s++) {
         const a = prev.pawns[s], b = state.pawns[s];
         if (a && b && (a.r !== b.r || a.c !== b.c)) {
           this.anim = { seat: s, from: { ...a }, to: { ...b }, t0: performance.now(), dur: 260 };
@@ -305,18 +316,26 @@ export class BoardRenderer {
   _drawGoalEdges(pal) {
     const ctx = this.ctx;
     const { S, margin } = this._metrics();
-    const c0 = this.config.p0Color, c1 = this.config.p1Color;
-    // p0 goal = top edge (row0), p1 goal = bottom edge
-    const grad0 = ctx.createLinearGradient(0, 0, 0, margin * 1.5);
-    grad0.addColorStop(0, this._withAlpha(c0, 0.5));
-    grad0.addColorStop(1, this._withAlpha(c0, 0));
-    ctx.fillStyle = grad0;
-    ctx.fillRect(0, 0, S, margin * 1.5);
-    const grad1 = ctx.createLinearGradient(0, S, 0, S - margin * 1.5);
-    grad1.addColorStop(0, this._withAlpha(c1, 0.5));
-    grad1.addColorStop(1, this._withAlpha(c1, 0));
-    ctx.fillStyle = grad1;
-    ctx.fillRect(0, S - margin * 1.5, S, margin * 1.5);
+    const n = this.state.numPlayers || this.state.pawns.length;
+    const t = margin * 1.5;
+    const band = (x, y, w, hgt, color, dir) => {
+      let g;
+      if (dir === 'top') g = ctx.createLinearGradient(0, y, 0, y + hgt);
+      else if (dir === 'bottom') g = ctx.createLinearGradient(0, y + hgt, 0, y);
+      else if (dir === 'left') g = ctx.createLinearGradient(x, 0, x + w, 0);
+      else g = ctx.createLinearGradient(x + w, 0, x, 0);
+      g.addColorStop(0, this._withAlpha(color, 0.5));
+      g.addColorStop(1, this._withAlpha(color, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, hgt);
+    };
+    // p0 goal = top, p1 = bottom, p2 = right, p3 = left
+    band(0, 0, S, t, this._seatColor(0), 'top');
+    band(0, S - t, S, t, this._seatColor(1), 'bottom');
+    if (n >= 4) {
+      band(S - t, 0, t, S, this._seatColor(2), 'right');
+      band(0, 0, t, S, this._seatColor(3), 'left');
+    }
   }
 
   _drawWall(w, alpha, preview, valid = true) {
@@ -351,8 +370,9 @@ export class BoardRenderer {
     const { cell } = this._metrics();
     const radius = cell * 0.33;
     const now = performance.now();
-    for (let s = 0; s < 2; s++) {
+    for (let s = 0; s < this.state.pawns.length; s++) {
       const p = this.state.pawns[s];
+      if (!p) continue; // eliminated
       let cx, cy;
       if (this.anim && this.anim.seat === s) {
         const t = Math.min(1, (now - this.anim.t0) / this.anim.dur);
@@ -365,7 +385,7 @@ export class BoardRenderer {
         const ctr = this._cellCenter(p.r, p.c);
         cx = ctr.x; cy = ctr.y;
       }
-      const color = s === 0 ? this.config.p0Color : this.config.p1Color;
+      const color = this._seatColor(s);
       // turn glow ring
       if (this.state.winner === null && this.state.turn === s) {
         ctx.beginPath();

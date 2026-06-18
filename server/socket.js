@@ -67,7 +67,7 @@ export function registerSocket(io, manager) {
 
         // Reconnect if this identity already holds a seat.
         const id = socket.data.identity;
-        for (let s = 0; s < 2; s++) {
+        for (let s = 0; s < room.players.length; s++) {
           const p = room.players[s];
           if (p && !p.isAI && !p.connected &&
               ((id.userId && p.userId === id.userId) || (id.guestId && p.guestId === id.guestId))) {
@@ -76,8 +76,9 @@ export function registerSocket(io, manager) {
           }
         }
 
-        if (room.isFull()) {
-          // join as spectator
+        // A game that is already running or finished, or has no free seat,
+        // can only be watched.
+        if (room.status !== 'waiting' || room.isFull()) {
           manager.spectatorJoin(room, socket);
           return cb?.({ ok: true, roomId: room.id, seat: -1, view: room.publicView(), spectator: true });
         }
@@ -134,12 +135,16 @@ export function registerSocket(io, manager) {
       if (seat < 0) return cb?.({ ok: false });
       room.rematchVotes.add(seat);
       manager.broadcast(room, 'game:rematchVote', { votes: [...room.rematchVotes] });
-      const needed = room.mode === 'ai' ? 1 : 2;
+      const needed = room.humanSeats().length; // every human must agree
       if (room.rematchVotes.size >= needed) {
-        // reset the engine, keep seats & colors
-        room.game = new (room.game.constructor)({ size: room.config.size, wallsEach: room.config.walls });
+        // Reset the engine and clocks, keeping seats, colors and AI.
+        room.game = new (room.game.constructor)({
+          size: room.config.size, wallsEach: room.config.walls, players: room.numPlayers,
+        });
+        room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
         room.status = 'active';
         room.rematchVotes.clear();
+        manager.startClock(room);
         manager.broadcast(room, 'game:start', room.publicView());
         manager.maybeRunAI(room);
       }
@@ -161,6 +166,19 @@ export function registerSocket(io, manager) {
 
     /* ----------------------------- Presence ------------------------------ */
     socket.on('lobby:stats', (cb) => cb?.(manager.liveStats()));
+    socket.on('lobby:games', (cb) => cb?.({ games: manager.liveGames() }));
+
+    /* --------------------------- Leave a room ---------------------------- */
+    socket.on('room:leave', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (room) {
+        manager.spectatorLeave(room, socket.id);
+        socket.leave(room.id);
+      }
+      socket.data.roomId = null;
+      socket.data.seat = -1;
+      cb?.({ ok: true });
+    });
 
     socket.on('disconnect', () => {
       manager.handleDisconnect(socket);

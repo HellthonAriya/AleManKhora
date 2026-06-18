@@ -170,9 +170,9 @@ export const Games = {
   recentForUser(userId, limit = 20) {
     return db.prepare(
       `SELECT * FROM games
-       WHERE (p0_id = ? OR p1_id = ?) AND status = 'finished'
+       WHERE (p0_id = ? OR p1_id = ? OR p2_id = ? OR p3_id = ?) AND status = 'finished'
        ORDER BY finished_at DESC LIMIT ?`
-    ).all(userId, userId, limit);
+    ).all(userId, userId, userId, userId, limit);
   },
   list({ status, limit = 50, offset = 0 } = {}) {
     if (status) {

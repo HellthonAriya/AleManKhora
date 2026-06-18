@@ -1,6 +1,7 @@
 /**
  * AleManKhora — Server entry point
  */
+import './loadenv.js'; // must be first: populate process.env from .env
 import express from 'express';
 import http from 'http';
 import path from 'path';

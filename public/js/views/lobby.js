@@ -19,8 +19,43 @@ export function LobbyView() {
     });
   }
   refreshStats();
+
+  // ---- Live games (spectate) ----
+  const liveMount = h('div', { class: 'live-list' });
+  function refreshLive() {
+    socket.emit('lobby:games', (res) => {
+      const games = res?.games || [];
+      liveMount.innerHTML = '';
+      if (!games.length) {
+        liveMount.append(h('p', { class: 'muted', style: 'padding:6px' }, 'هیچ بازی زنده‌ای در جریان نیست.'));
+        return;
+      }
+      games.forEach((g) => liveMount.append(liveGameCard(g)));
+    });
+  }
+  refreshLive();
+
   const statsTimer = setInterval(refreshStats, 5000);
-  const cleanup = () => clearInterval(statsTimer);
+  const liveTimer = setInterval(refreshLive, 6000);
+  const cleanup = () => { clearInterval(statsTimer); clearInterval(liveTimer); };
+
+  function liveGameCard(g) {
+    const names = g.players.map((p, i) => h('span', { class: 'live-player' },
+      h('span', { class: 'dotc', style: `background:${p?.color || '#888'}` }),
+      p ? p.name : '—')).reduce((acc, el, i) => {
+        if (i) acc.push(h('span', { class: 'faint' }, '⚔'));
+        acc.push(el); return acc;
+      }, []);
+    return h('div', { class: 'live-card', onclick: () => navigate(`/game/${g.id}`) },
+      h('div', { style: 'flex:1;min-width:0' },
+        h('div', { class: 'live-players' }, ...names),
+        h('div', { class: 'faint' },
+          `${g.numPlayers === 4 ? '۴ نفره' : '۲ نفره'} · ${faNum(g.size)}×${faNum(g.size)} · ${faNum(g.moveCount)} حرکت`)),
+      h('div', { class: 'live-watch' },
+        h('span', { class: 'pill' }, `👁 ${faNum(g.spectators)}`),
+        h('button', { class: 'btn btn-sm' }, 'تماشا')),
+    );
+  }
 
   const view = h('div', { class: 'fade-in', dataset: { cleanup: '1' } },
     h('div', {},
@@ -42,6 +77,11 @@ export function LobbyView() {
         h('div', { class: 'divider' }, 'یا'),
         h('button', { class: 'btn btn-block', onclick: () => openAI() }, '🤖 بازی فوری با هوش مصنوعی'),
       ),
+    ),
+    h('div', { class: 'card', style: 'margin-top:22px' },
+      h('div', { class: 'card-title' }, '📺 بازی‌های زندهٔ در حال پخش'),
+      h('p', { class: 'card-sub' }, 'روی هر بازی بزن تا به‌صورت زنده تماشا کنی.'),
+      liveMount,
     ),
   );
 

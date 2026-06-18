@@ -82,7 +82,7 @@ function startDemo(canvas, view) {
     }
     if (!acted) {
       const moves = g.legalMoves(me);
-      const goal = g.goalRow[me];
+      const goal = g.goals[me].value;
       moves.sort((a, b) => Math.abs(a.r - goal) - Math.abs(b.r - goal));
       try { g.apply(me, { type: 'move', ...moves[0] }); } catch {}
     }

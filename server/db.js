@@ -59,6 +59,17 @@ CREATE INDEX IF NOT EXISTS idx_users_elo ON users(elo DESC);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 `);
 
+/* --------------------------- Schema migrations ---------------------------- */
+// Add player 2 & 3 columns for 4-player games (idempotent).
+const gameCols = db.prepare("PRAGMA table_info(games)").all().map((c) => c.name);
+const addCol = (name, type = 'TEXT') => {
+  if (!gameCols.includes(name)) db.exec(`ALTER TABLE games ADD COLUMN ${name} ${type}`);
+};
+addCol('p2_id', 'INTEGER');
+addCol('p3_id', 'INTEGER');
+addCol('p2_name', 'TEXT');
+addCol('p3_name', 'TEXT');
+
 /* --------------------------- Default settings ----------------------------- */
 const DEFAULT_SETTINGS = {
   site_name: 'اِل من خورا',

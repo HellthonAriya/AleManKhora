@@ -171,6 +171,26 @@ input, select, textarea { font-family: inherit; }
 .pill { padding: 6px 13px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); font-size: .82rem; font-weight: 600; }
 .pill .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-inline-end: 6px; box-shadow: 0 0 8px var(--accent); }
 
+/* ---- Live games list ---- */
+.live-list { display: flex; flex-direction: column; gap: 10px; }
+.live-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; transition: .15s; }
+.live-card:hover { border-color: var(--accent); transform: translateX(-3px); }
+.live-players { display: flex; align-items: center; gap: 8px; font-weight: 700; flex-wrap: wrap; }
+.live-player { display: inline-flex; align-items: center; gap: 6px; }
+.dotc { width: 11px; height: 11px; border-radius: 50%; display: inline-block; box-shadow: 0 0 6px currentColor; }
+.live-watch { display: flex; align-items: center; gap: 8px; }
+
+/* ---- Chess clock ---- */
+.clock { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 1.15rem; padding: 5px 12px;
+  border-radius: 9px; background: rgba(8,12,20,.5); border: 1px solid var(--border); letter-spacing: 1px; }
+.clock.active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.clock.low { color: var(--danger); border-color: var(--danger); animation: clockpulse 1s ease-in-out infinite; }
+.clock.flagged { opacity: .5; text-decoration: line-through; }
+@keyframes clockpulse { 0%,100%{ opacity:1;} 50%{ opacity:.55;} }
+.player-card.eliminated { opacity: .5; }
+.player-card.eliminated .pc-name { text-decoration: line-through; }
+
 /* ---- Customization controls ---- */
 .opt-group { margin-bottom: 18px; }
 .opt-group > label { display:block; font-size:.82rem; color: var(--text-dim); margin-bottom: 9px; font-weight: 700; }

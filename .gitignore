@@ -5,3 +5,6 @@ data/*.db-wal
 *.log
 .env
 .DS_Store
+run/
+logs/
+backups/
