@@ -1,0 +1,30 @@
+{
+  "name": "alemankhora",
+  "version": "1.0.0",
+  "description": "اِل من خورا — a complete online Quoridor-style strategy game (move or build a wall) with multiplayer, AI, leaderboard, invites and admin panel.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js"
+  },
+  "keywords": [
+    "quoridor",
+    "game",
+    "multiplayer",
+    "websocket",
+    "board-game"
+  ],
+  "author": "AleManKhora",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "nanoid": "^5.0.7",
+    "socket.io": "^4.7.5"
+  }
+}
