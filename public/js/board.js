@@ -169,10 +169,11 @@ export class BoardRenderer {
     this.canvas.addEventListener('mousemove', (e) => this._onMove(e));
     this.canvas.addEventListener('mouseleave', () => { this.hover = null; this.draw(); });
     this.canvas.addEventListener('click', (e) => this._onClick(e));
-    // touch: tap to act
+    // touch: tap to act — prevent scroll/selection on the board
     this.canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
       if (e.touches[0]) { this._onMove(e.touches[0]); }
-    }, { passive: true });
+    }, { passive: false });
   }
   _pos(e) {
     const rect = this.canvas.getBoundingClientRect();
