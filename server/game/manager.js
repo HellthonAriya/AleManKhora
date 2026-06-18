@@ -25,6 +25,9 @@ const TIME_INCREMENTS = [0, 2, 3, 5, 10];             // seconds added per move
 // and play continues.
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
+// How long a disconnected player has to reconnect before being eliminated.
+const RECONNECT_GRACE_MS = 2 * 60 * 1000; // 2 minutes
+
 function sanitizeConfig(cfg = {}) {
   const s = getSettings();
   let size = parseInt(cfg.size, 10);
@@ -422,6 +425,11 @@ export class GameManager {
       room.players[seat].connected = false;
       this.broadcast(room, 'player:disconnect', { seat });
       if (room.status === 'active') {
+        // Pause the idle timer while the player is away — they can't move
+        // when disconnected; resume it on reconnect.
+        if (room.game.turn === seat && !room.game.eliminated[seat]) {
+          this.clearIdleTimer(room);
+        }
         setTimeout(() => {
           const r = this.rooms.get(roomId);
           if (!r || r.status !== 'active') return;
@@ -437,7 +445,7 @@ export class GameManager {
               this.playerOut(r, seat, 'abandon');
             }
           }
-        }, 30000);
+        }, RECONNECT_GRACE_MS);
       }
     }
     this.spectatorLeave(room, socket.id);
@@ -451,6 +459,11 @@ export class GameManager {
     socket.data.roomId = room.id;
     socket.data.seat = seat;
     this.broadcast(room, 'player:reconnect', { seat });
+    // Resume idle timer if it's their turn (was paused on disconnect).
+    if (room.status === 'active' && room.game.winner === null &&
+        room.game.turn === seat && !room.game.eliminated[seat]) {
+      this.resetIdleTimer(room);
+    }
   }
 
   spectatorJoin(room, socket) {
