@@ -87,10 +87,35 @@ export class BoardRenderer {
   _recomputeLegal() {
     this.legal = [];
     if (!this.engine || this.mySeat < 0) return;
-    if (this.mode === 'move' && this.state.turn === this.mySeat && this.state.winner === null && this.interactive) {
+    if (this.state.turn === this.mySeat && this.state.winner === null && this.interactive) {
       this.legal = this.engine.legalMoves(this.mySeat);
     }
   }
+
+  /** Called by the wall drag UI to preview a wall at CSS-pixel canvas coords. */
+  previewDraggedWall(cssMx, cssMy, o) {
+    if (!this.state) { this.hover = null; this.draw(); return; }
+    const w = this._nearestWallOriented(cssMx, cssMy, o);
+    if (w) {
+      const valid = this.engine && this.mySeat >= 0 &&
+        this.engine.canPlaceWall(this.mySeat, w.r, w.c, w.o);
+      this.hover = { ...w, valid };
+    } else {
+      this.hover = null;
+    }
+    this.draw();
+  }
+
+  /** Returns the wall at CSS-pixel canvas coords with the given orientation, or null if invalid. */
+  getWallAtPos(cssMx, cssMy, o) {
+    if (!this.state || !this.engine) return null;
+    const w = this._nearestWallOriented(cssMx, cssMy, o);
+    if (!w) return null;
+    if (!this.engine.canPlaceWall(this.mySeat, w.r, w.c, w.o)) return null;
+    return w;
+  }
+
+  clearWallPreview() { this.hover = null; this.draw(); }
 
   /* ------------------------------ Geometry ------------------------------- */
   _resize() {
@@ -167,6 +192,29 @@ export class BoardRenderer {
     return null;
   }
 
+  _nearestWallOriented(mx, my, o) {
+    const { N, margin, cell, gap } = this._metrics();
+    const step = cell + gap;
+    if (o === 'h') {
+      let rowIdx = 0, bestD = Infinity;
+      for (let r = 0; r <= N - 2; r++) {
+        const yc = margin + (r + 1) * cell + r * gap + gap / 2;
+        const d = Math.abs(my - yc); if (d < bestD) { bestD = d; rowIdx = r; }
+      }
+      let c = Math.round((mx - margin - cell - gap / 2) / step);
+      c = Math.max(0, Math.min(N - 2, c));
+      return { kind: 'wall', o: 'h', r: rowIdx, c };
+    }
+    let colIdx = 0, bestD = Infinity;
+    for (let c = 0; c <= N - 2; c++) {
+      const xc = margin + (c + 1) * cell + c * gap + gap / 2;
+      const d = Math.abs(mx - xc); if (d < bestD) { bestD = d; colIdx = c; }
+    }
+    let r = Math.round((my - margin - cell - gap / 2) / step);
+    r = Math.max(0, Math.min(N - 2, r));
+    return { kind: 'wall', o: 'v', r, c: colIdx };
+  }
+
   _nearestWall(mx, my) {
     const { N, margin, cell, gap } = this._metrics();
     // groove center positions
@@ -214,12 +262,14 @@ export class BoardRenderer {
   _onClick(e) {
     if (!this._myTurn()) return;
     const { mx, my } = this._pos(e);
-    if (this.mode === 'move') {
-      const cell = this._hitCell(mx, my);
-      if (cell && this.legal.some((d) => d.r === cell.r && d.c === cell.c)) {
-        this.onMove?.(cell.r, cell.c);
-      }
-    } else {
+    // Legal move cells always take priority over wall placement
+    const cell = this._hitCell(mx, my);
+    if (cell && this.legal.some((d) => d.r === cell.r && d.c === cell.c)) {
+      this.onMove?.(cell.r, cell.c);
+      return;
+    }
+    // Wall placement only in wall mode (active during drag)
+    if (this.mode === 'wall') {
       const w = this._nearestWall(mx, my);
       if (w && this.engine.canPlaceWall(this.mySeat, w.r, w.c, w.o)) {
         this.onWall?.(w.r, w.c, w.o);
@@ -279,8 +329,8 @@ export class BoardRenderer {
       ctx.stroke();
     }
 
-    // Legal move targets
-    if (this.legal.length && this.mode === 'move' && this._myTurn()) {
+    // Legal move targets — always show when it's my turn
+    if (this.legal.length && this._myTurn()) {
       for (const d of this.legal) {
         const { x, y } = this._cellCenter(d.r, d.c);
         ctx.beginPath();

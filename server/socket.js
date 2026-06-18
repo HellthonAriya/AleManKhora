@@ -173,6 +173,10 @@ export function registerSocket(io, manager) {
       const room = manager.getRoom(socket.data.roomId);
       if (room) {
         manager.spectatorLeave(room, socket.id);
+        if (room.voiceMembers?.has(socket.id)) {
+          room.voiceMembers.delete(socket.id);
+          for (const sid of room.voiceMembers) io.to(sid).emit('voice:left', { socketId: socket.id });
+        }
         socket.leave(room.id);
       }
       socket.data.roomId = null;
@@ -180,7 +184,100 @@ export function registerSocket(io, manager) {
       cb?.({ ok: true });
     });
 
+    /* ========================= Voice chat signaling ========================= */
+
+    socket.on('voice:join', () => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room) return;
+      if (!room.voiceMembers) room.voiceMembers = new Set();
+
+      const identity = socket.data.identity;
+      const seatIdx = room.seatOf(socket.id);
+
+      // Tell the new member about every existing voice participant.
+      for (const sid of room.voiceMembers) {
+        const s = io.sockets.sockets.get(sid);
+        if (!s) continue;
+        socket.emit('voice:joined', {
+          socketId: sid,
+          name: s.data.identity?.name || '?',
+          seat: room.seatOf(sid),
+          existingMember: true, // they will wait for our offer
+        });
+      }
+
+      // Tell existing members about the new participant (they initiate offers).
+      for (const sid of room.voiceMembers) {
+        io.to(sid).emit('voice:joined', {
+          socketId: socket.id,
+          name: identity.name,
+          seat: seatIdx,
+        });
+      }
+
+      room.voiceMembers.add(socket.id);
+    });
+
+    socket.on('voice:leave', () => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room?.voiceMembers) return;
+      room.voiceMembers.delete(socket.id);
+      for (const sid of room.voiceMembers) {
+        io.to(sid).emit('voice:left', { socketId: socket.id });
+      }
+    });
+
+    socket.on('voice:signal', ({ to, data }) => {
+      if (!to || !data) return;
+      io.to(to).emit('voice:signal', { from: socket.id, data });
+    });
+
+    socket.on('voice:spectator-request', () => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room?.voiceMembers) return;
+      if (!room.voiceRequests) room.voiceRequests = new Map();
+      const identity = socket.data.identity;
+      room.voiceRequests.set(socket.id, { name: identity.name, votes: new Set() });
+      // Notify players who are currently in voice.
+      for (const sid of room.voiceMembers) {
+        if (room.seatOf(sid) >= 0) {
+          io.to(sid).emit('voice:spectator-request', { socketId: socket.id, name: identity.name });
+        }
+      }
+    });
+
+    socket.on('voice:spectator-vote', ({ requesterId, accept }) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room?.voiceRequests) return;
+      const req = room.voiceRequests.get(requesterId);
+      if (!req) return;
+
+      if (!accept) {
+        room.voiceRequests.delete(requesterId);
+        io.to(requesterId).emit('voice:spectator-denied');
+        return;
+      }
+
+      req.votes.add(socket.id);
+      const playerVoiceCount = [...(room.voiceMembers || [])].filter((sid) => room.seatOf(sid) >= 0).length;
+      if (req.votes.size >= Math.max(1, playerVoiceCount)) {
+        room.voiceRequests.delete(requesterId);
+        io.to(requesterId).emit('voice:spectator-granted');
+        // Introduce them to existing voice members when they actually emit voice:join.
+      }
+    });
+
+    /* ================================================================= */
+
     socket.on('disconnect', () => {
+      // Clean up voice membership on disconnect
+      const room = manager.getRoom(socket.data.roomId);
+      if (room?.voiceMembers?.has(socket.id)) {
+        room.voiceMembers.delete(socket.id);
+        for (const sid of room.voiceMembers) {
+          io.to(sid).emit('voice:left', { socketId: socket.id });
+        }
+      }
       manager.handleDisconnect(socket);
     });
   });

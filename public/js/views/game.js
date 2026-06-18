@@ -1,7 +1,8 @@
 /* اِل من خورا — In-game view (real-time room): 2 or 4 players, chess clock,
-   spectating, chat, invites, resign, rematch. */
+   spectating, chat, invites, resign, rematch, voice chat. */
 import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock } from '../core.js';
 import { BoardRenderer } from '../board.js';
+import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
 
 const SEAT_LABELS = ['۱', '۲', '۳', '۴'];
@@ -15,13 +16,12 @@ export function GameView(roomId) {
   let players = [];
   let numPlayers = 2;
   let aiSeats = [];
-  let mode = 'move';
   let status = 'waiting';
   let code = null;
 
   // local clock model
   let clock = { enabled: false, remaining: [], turn: 0, running: false, incMs: 0, limitMs: 0 };
-  let clockLocalStart = 0; // performance.now() when current turn's countdown began
+  let clockLocalStart = 0;
   let clockTimer = null;
 
   const canvas = h('canvas', { id: 'board' });
@@ -31,13 +31,162 @@ export function GameView(roomId) {
   const chatLog = h('div', { class: 'chat-log' });
   const sideTop = h('div', { class: 'game-side' });
   const sideBottom = h('div', { class: 'game-side' });
-  // map seat -> clock element for live updates
   const clockEls = {};
 
   const renderer = new BoardRenderer(canvas, {
     onMove: (r, c) => act({ type: 'move', r, c }),
     onWall: (r, c, o) => act({ type: 'wall', r, c, o }),
   });
+
+  /* ========================= Wall drag tray ========================= */
+  const wallTray = h('div', { class: 'wall-tray inactive' });
+
+  function makeDragPiece(o) {
+    const barCls = o === 'h' ? 'wall-piece-bar-h' : 'wall-piece-bar-v';
+    const label = o === 'h' ? 'افقی' : 'عمودی';
+    const piece = h('div', { class: 'wall-piece' }, h('div', { class: barCls }), label);
+    piece.addEventListener('pointerdown', (e) => startWallDrag(e, o));
+    return piece;
+  }
+
+  wallTray.append(makeDragPiece('h'), makeDragPiece('v'));
+
+  let dragGhost = null;
+  let dragO = null;
+
+  function startWallDrag(e, o) {
+    if (!isMyTurnActive() || !state || state.wallsLeft[seat] <= 0) return;
+    e.preventDefault();
+    dragO = o;
+    renderer.setMode('wall');
+
+    const barCls = o === 'h' ? 'wall-piece-bar-h' : 'wall-piece-bar-v';
+    dragGhost = h('div', { class: 'drag-ghost' }, h('div', { class: barCls }));
+    document.body.appendChild(dragGhost);
+    moveDragGhost(e.clientX, e.clientY);
+
+    document.addEventListener('pointermove', onDragMove);
+    document.addEventListener('pointerup', onDragEnd, { once: true });
+  }
+
+  function moveDragGhost(cx, cy) {
+    if (dragGhost) { dragGhost.style.left = cx + 'px'; dragGhost.style.top = cy + 'px'; }
+  }
+
+  function canvasRelative(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    return { mx: clientX - rect.left, my: clientY - rect.top, inCanvas: clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom };
+  }
+
+  function onDragMove(e) {
+    moveDragGhost(e.clientX, e.clientY);
+    const { mx, my, inCanvas } = canvasRelative(e.clientX, e.clientY);
+    if (inCanvas) renderer.previewDraggedWall(mx, my, dragO);
+    else renderer.clearWallPreview();
+  }
+
+  function onDragEnd(e) {
+    document.removeEventListener('pointermove', onDragMove);
+    const { mx, my, inCanvas } = canvasRelative(e.clientX, e.clientY);
+    if (inCanvas) {
+      const w = renderer.getWallAtPos(mx, my, dragO);
+      if (w) act({ type: 'wall', r: w.r, c: w.c, o: dragO });
+    }
+    dragGhost?.remove(); dragGhost = null; dragO = null;
+    renderer.setMode('move');
+    renderer.clearWallPreview();
+  }
+
+  function updateWallTray() {
+    const active = isMyTurnActive() && state?.wallsLeft[seat] > 0;
+    wallTray.classList.toggle('inactive', !active);
+  }
+
+  function isMyTurnActive() {
+    return !spectator && status === 'active' && state?.winner === null &&
+      state?.turn === seat && !state?.eliminated?.[seat];
+  }
+
+  /* ========================= Voice chat ========================= */
+  const voice = new VoiceChat(socket);
+  const voiceMount = h('div', {});
+
+  voice.onUpdate = (event) => {
+    if (event === 'denied') toast('درخواست صدا رد شد', 'error');
+    renderVoicePanel();
+  };
+  voice.onSpectatorRequest = ({ socketId, name }) => {
+    if (!voice.active) return;
+    // Only players in voice chat get to vote
+    if (seat < 0) return;
+    modal({
+      title: '🎙 درخواست ویس چت',
+      body: h('p', { class: 'muted' }, `«${name}» (تماشاگر) می‌خواهد به صدا ملحق شود.`),
+      actions: [
+        { label: 'رد کردن', class: 'btn-ghost', onClick: () => { voice.voteSpectator(socketId, false); } },
+        { label: 'پذیرفتن', class: 'btn-primary', onClick: () => { voice.voteSpectator(socketId, true); } },
+      ],
+    });
+  };
+
+  function renderVoicePanel() {
+    clear(voiceMount);
+    const card = h('div', { class: 'card' },
+      h('div', { class: 'card-title' }, '🎙 صدا'),
+    );
+    const panel = h('div', { class: 'voice-panel' });
+
+    if (voice.active) {
+      // Self entry (always first)
+      const selfEl = h('div', { class: 'voice-participant' },
+        h('div', { class: `vc-dot ${voice.muted ? 'muted' : 'on'}` }),
+        h('div', { class: 'vc-name' }, (store.me?.username || 'من') + ' (تو)'),
+        h('button', { class: 'btn btn-sm', onclick: () => { voice.toggleMute(); } },
+          voice.muted ? '🔇 آنمیوت' : '🎙 میوت'),
+      );
+      panel.append(selfEl);
+
+      for (const [sid, p] of voice.participants) {
+        panel.append(h('div', { class: 'voice-participant' },
+          h('div', { class: 'vc-dot on' }),
+          h('div', { class: 'vc-name' }, p.name),
+        ));
+      }
+
+      card.append(panel,
+        h('button', {
+          class: 'btn btn-sm btn-danger btn-block', style: 'margin-top:12px',
+          onclick: () => { voice.leave(); renderVoicePanel(); },
+        }, '📵 خروج از صدا'),
+      );
+    } else {
+      const joinBtn = h('button', {
+        class: 'btn btn-sm btn-block', style: 'margin-top:0',
+        onclick: async () => {
+          joinBtn.disabled = true;
+          try { await voice.join(); }
+          catch { toast('دسترسی به میکروفون رد شد', 'error'); }
+          joinBtn.disabled = false;
+        },
+      }, '🎙 ورود به صدا');
+
+      if (spectator) {
+        card.append(
+          h('p', { class: 'faint', style: 'margin-bottom:8px' }, 'درخواست پیوستن به ویس چت:'),
+          h('button', {
+            class: 'btn btn-sm btn-block',
+            onclick: () => { voice.requestSpectatorAccess(); toast('درخواست فرستاده شد…'); },
+          }, '🙋 درخواست صدا'),
+        );
+      } else {
+        card.append(joinBtn);
+      }
+    }
+
+    voiceMount.append(card);
+  }
+
+  /* ========================= Core rendering ========================= */
 
   function act(action) {
     socket.emit('game:action', { action }, (res) => {
@@ -46,19 +195,17 @@ export function GameView(roomId) {
   }
   function seatColor(s) { return (config?.colors && config.colors[s]) || ['#36c6ff', '#ff6b6b', '#ffd36b', '#9b8cff'][s]; }
 
-  /* ----------------------------- Rendering ------------------------------ */
   function syncRenderer() {
     if (!state) return;
     renderer.setConfig({ theme: config.theme, colors: config.colors || [config.p0Color, config.p1Color, '#ffd36b', '#9b8cff'] });
     renderer.setMySeat(seat);
-    renderer.setMode(mode);
     renderer.setState(state);
-    const myTurn = !spectator && status === 'active' && state.winner === null &&
-      state.turn === seat && !state.eliminated?.[seat];
+    const myTurn = isMyTurnActive();
     renderer.setInteractive(myTurn);
     updateBanner(myTurn);
     renderPlayerCards();
     renderControls();
+    updateWallTray();
   }
 
   function updateBanner(myTurn) {
@@ -132,27 +279,17 @@ export function GameView(roomId) {
       return;
     }
     if (status === 'active') {
-      const noWalls = state.wallsLeft[seat] <= 0;
-      if (mode === 'wall' && noWalls) mode = 'move';
-      const toggle = h('div', { class: 'mode-toggle' },
-        h('button', { class: mode === 'move' ? 'active' : '', onclick: () => setMode('move') }, '🚶 حرکت'),
-        h('button', { class: (mode === 'wall' ? 'active' : '') + (noWalls ? ' disabled' : ''),
-          onclick: () => { if (!noWalls) setMode('wall'); } }, '🧱 دیوار'),
-      );
       controlsMount.append(h('div', { class: 'card' },
         h('div', { class: 'card-title' }, 'کنترل نوبت'),
-        toggle,
-        h('p', { class: 'hint-line', style: 'margin-top:10px' },
-          mode === 'move' ? '🚶 روی خانهٔ برجسته‌شده کلیک کن.' : '🧱 نشانگر را بین خانه‌ها ببر و کلیک کن.'),
-        noWalls ? h('p', { class: 'faint' }, 'دیوارهایت تمام شده است.') : null,
+        h('p', { class: 'hint-line', style: 'margin-bottom:10px' },
+          '🚶 روی نقطه کلیک کن تا حرکت کنی.\n🧱 دیوار را از پایین صفحه به روی تخته بکش.'),
+        state.wallsLeft[seat] <= 0 ? h('p', { class: 'faint' }, 'دیوارهایت تمام شده است.') : null,
         h('button', { class: 'btn btn-danger btn-sm btn-block', style: 'margin-top:14px', onclick: doResign }, '🏳 تسلیم'),
       ));
     }
   }
 
-  function setMode(m) { mode = m; renderer.setMode(m); renderControls(); }
-
-  /* ------------------------------ Clock --------------------------------- */
+  /* ========================= Chess clock ========================= */
   function setClock(cv) {
     if (!cv) return;
     clock = {
@@ -164,17 +301,13 @@ export function GameView(roomId) {
   }
   function effectiveRemaining(s) {
     let ms = clock.remaining[s] ?? clock.limitMs;
-    if (clock.running && s === clock.turn && status === 'active') {
-      ms -= (performance.now() - clockLocalStart);
-    }
+    if (clock.running && s === clock.turn && status === 'active') ms -= (performance.now() - clockLocalStart);
     return Math.max(0, ms);
   }
   function paintClocks() {
     if (!clock.enabled) return;
     for (const s of Object.keys(clockEls)) {
-      const seatNum = +s;
-      const el = clockEls[s];
-      if (!el) continue;
+      const seatNum = +s; const el = clockEls[s]; if (!el) continue;
       const ms = effectiveRemaining(seatNum);
       el.textContent = formatClock(ms);
       el.classList.toggle('low', ms <= 15000 && clock.running && seatNum === clock.turn);
@@ -182,7 +315,7 @@ export function GameView(roomId) {
   }
   clockTimer = setInterval(paintClocks, 250);
 
-  /* ----------------------------- Actions -------------------------------- */
+  /* ========================= Actions ========================= */
   function copyCode() { navigator.clipboard?.writeText(code); toast('کد کپی شد', 'success'); }
   function copyLink() {
     navigator.clipboard?.writeText(`${location.origin}/#/game/${roomId}`);
@@ -194,7 +327,7 @@ export function GameView(roomId) {
     }
   }
 
-  /* ------------------------------- Chat --------------------------------- */
+  /* ========================= Chat ========================= */
   function addChat({ from, text, seat: fromSeat }) {
     chatLog.append(h('div', { class: 'chat-msg' + (fromSeat === seat ? ' me' : '') },
       h('span', { class: 'who' }, from), text));
@@ -203,13 +336,11 @@ export function GameView(roomId) {
   const chatInput = h('input', { class: 'input', placeholder: 'پیام…', maxlength: 240,
     onkeydown: (e) => { if (e.key === 'Enter') sendChat(); } });
   function sendChat() {
-    const text = chatInput.value.trim();
-    if (!text) return;
-    socket.emit('chat:message', { text });
-    chatInput.value = '';
+    const text = chatInput.value.trim(); if (!text) return;
+    socket.emit('chat:message', { text }); chatInput.value = '';
   }
 
-  /* --------------------------- Socket events ---------------------------- */
+  /* ========================= Socket events ========================= */
   function applyView(v) {
     config = v.config; state = v.state; players = v.players;
     numPlayers = v.numPlayers || v.players?.length || 2;
@@ -264,7 +395,7 @@ export function GameView(roomId) {
     });
   }
 
-  /* ------------------------------- Join --------------------------------- */
+  /* ========================= Join ========================= */
   socket.emit('room:join', { roomId }, (res) => {
     if (!res?.ok) { toast(res?.error || 'بازی پیدا نشد', 'error'); navigate('/lobby'); return; }
     seat = res.seat;
@@ -272,9 +403,10 @@ export function GameView(roomId) {
     applyView(res.view);
     if (res.reconnected) toast('به بازی برگشتی', 'success');
     if (res.spectator) toast('در حال تماشای زنده', 'success');
+    renderVoicePanel();
   });
 
-  /* ------------------------------ Layout -------------------------------- */
+  /* ========================= Layout ========================= */
   sideTop.append(playerCardsMount, controlsMount);
   sideBottom.append(
     h('div', { class: 'card' },
@@ -283,6 +415,7 @@ export function GameView(roomId) {
         h('div', { class: 'chat-input' }, chatInput,
           h('button', { class: 'btn btn-sm', onclick: sendChat }, 'ارسال'))),
     ),
+    voiceMount,
   );
 
   const view = h('div', { class: 'game-view fade-in' },
@@ -290,6 +423,7 @@ export function GameView(roomId) {
     h('div', { class: 'board-stage' },
       turnBanner,
       h('div', { class: 'board-frame' }, canvas),
+      wallTray,
       h('div', { class: 'faint' }, `اتاق: ${roomId.slice(0, 6)}`),
     ),
     sideBottom,
@@ -298,6 +432,9 @@ export function GameView(roomId) {
   view.addEventListener('view:destroy', () => {
     for (const [ev, fn] of Object.entries(handlers)) socket.off(ev, fn);
     if (clockTimer) clearInterval(clockTimer);
+    dragGhost?.remove();
+    document.removeEventListener('pointermove', onDragMove);
+    voice.destroy();
     socket.emit('room:leave');
   });
 

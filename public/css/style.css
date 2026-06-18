@@ -319,3 +319,56 @@ table.tbl tr:hover td { background: rgba(255,255,255,.02); }
 
 .hidden { display: none !important; }
 .fade-in { animation: toast-in .3s ease; }
+
+/* ---- Mobile modal scroll ---- */
+.modal { max-height: calc(100dvh - 40px); overflow-y: auto; }
+@media (max-width: 600px) {
+  .modal-overlay { align-items: flex-start; }
+}
+
+/* ---- Wall drag tray ---- */
+.wall-tray {
+  display: flex; align-items: flex-end; gap: 24px; justify-content: center;
+  background: var(--panel-solid); border: 1px solid var(--border-strong);
+  border-radius: 18px; padding: 14px 22px; box-shadow: var(--shadow);
+}
+.wall-tray.inactive { opacity: .38; pointer-events: none; }
+.wall-piece {
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  cursor: grab; user-select: none; touch-action: none;
+  padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--panel-2); font-size: .76rem; color: var(--text-dim);
+  transition: border-color .15s, color .15s, transform .12s;
+}
+.wall-piece:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-2px); }
+.wall-piece-bar-h {
+  width: 62px; height: 14px; border-radius: 5px;
+  background: linear-gradient(90deg, #f4e7c1, #c8a84b);
+  box-shadow: 0 3px 12px rgba(0,0,0,.5);
+}
+.wall-piece-bar-v {
+  width: 14px; height: 62px; border-radius: 5px;
+  background: linear-gradient(180deg, #f4e7c1, #c8a84b);
+  box-shadow: 0 3px 12px rgba(0,0,0,.5);
+}
+.drag-ghost {
+  position: fixed; z-index: 9999; pointer-events: none;
+  transform: translate(-50%, -50%); opacity: .85;
+  filter: drop-shadow(0 8px 24px rgba(0,0,0,.7));
+}
+
+/* ---- Voice chat ---- */
+.voice-panel { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.voice-participant {
+  display: flex; align-items: center; gap: 10px; padding: 9px 13px;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border); transition: .15s;
+}
+.vc-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+.vc-dot.on   { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.vc-dot.off  { background: var(--text-faint); }
+.vc-dot.muted { background: var(--danger); }
+.vc-name { flex: 1; font-weight: 700; font-size: .9rem; }
+.vc-request {
+  display: flex; align-items: center; gap: 8px; padding: 9px 13px; font-size: .87rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--warn);
+}
