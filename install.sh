@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  اَل من خورا (AleManKhora) — one-command installer
+#  اَلِ من خورا (AleManKhora) — one-command installer
 #  Usage:
 #    bash <(curl -fsSL https://raw.githubusercontent.com/HellthonAriya/AleManKhora/claude/wrongway-web-game-mfjws8/install.sh)
 #
@@ -36,7 +36,7 @@ cat <<'B'
   / _ |/ /__  /  |/  /__ ____   / |/ // /  ___  _______ _
  / __ / / -_)/ /|_/ / _ `/ _ \ /    // _ \/ _ \/ __/ _ `/
 /_/ |_/_/\__//_/  /_/\_,_/_//_//_/|_//_//_/\___/_/  \_,_/
-            اَل من خورا — installer
+            اَلِ من خورا — installer
 B
 }
 
@@ -139,7 +139,7 @@ setup_service() {
   local node_bin; node_bin="$(command -v node)"
   cat > /etc/systemd/system/alemankhora.service <<EOF
 [Unit]
-Description=AleManKhora (اَل من خورا) game server
+Description=AleManKhora (اَلِ من خورا) game server
 After=network.target
 
 [Service]

@@ -1,4 +1,4 @@
-/* اَل من خورا — WebRTC voice chat (mesh, per room) */
+/* اَلِ من خورا — WebRTC voice chat (mesh, per room) */
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },

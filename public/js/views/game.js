@@ -1,6 +1,6 @@
-/* اَل من خورا — In-game view (real-time room): 2 or 4 players, chess clock,
+/* اَلِ من خورا — In-game view (real-time room): 2 or 4 players, chess clock,
    spectating, chat, invites, resign, rematch, voice chat. */
-import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock } from '../core.js';
+import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock, copyText } from '../core.js';
 import { BoardRenderer } from '../board.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
@@ -316,10 +316,13 @@ export function GameView(roomId) {
   clockTimer = setInterval(paintClocks, 250);
 
   /* ========================= Actions ========================= */
-  function copyCode() { navigator.clipboard?.writeText(code); toast('کد کپی شد', 'success'); }
-  function copyLink() {
-    navigator.clipboard?.writeText(`${location.origin}/#/game/${roomId}`);
-    toast('لینک دعوت کپی شد', 'success');
+  async function copyCode() {
+    const ok = await copyText(code);
+    toast(ok ? 'کد کپی شد' : 'کپی نشد — دستی انتخاب کن', ok ? 'success' : 'error');
+  }
+  async function copyLink() {
+    const ok = await copyText(`${location.origin}/#/game/${roomId}`);
+    toast(ok ? 'لینک دعوت کپی شد' : 'کپی نشد — دستی انتخاب کن', ok ? 'success' : 'error');
   }
   async function doResign() {
     if (await confirmDialog('تسلیم شدن', 'مطمئنی می‌خواهی تسلیم شوی؟', { danger: true, confirmLabel: 'تسلیم' })) {

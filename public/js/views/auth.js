@@ -1,4 +1,4 @@
-/* اَل من خورا — Authentication view (login / register / guest) */
+/* اَلِ من خورا — Authentication view (login / register / guest) */
 import { h, store, api, toast, $ } from '../core.js';
 import { navigate, refreshMe, redirectAfterAuth } from '../app.js';
 
@@ -97,7 +97,7 @@ export function AuthView(mode = 'login') {
 
   return h('div', { class: 'auth-wrap fade-in' },
     h('div', { class: 'card' },
-      h('h1', { class: 'center', style: 'margin-bottom:6px' }, 'اَل من خورا'),
+      h('h1', { class: 'center', style: 'margin-bottom:6px' }, 'اَلِ من خورا'),
       h('p', { class: 'center muted', style: 'margin-bottom:20px' }, 'وارد شو و نبرد را آغاز کن'),
       tabs,
       formMount,

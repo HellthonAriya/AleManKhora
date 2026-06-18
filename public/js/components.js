@@ -1,4 +1,4 @@
-/* اَل من خورا — Reusable UI components */
+/* اَلِ من خورا — Reusable UI components */
 import { h, PLAYER_COLORS, THEMES, store } from './core.js';
 import { BoardRenderer } from './board.js';
 import { QuoridorGame } from './engine.js';

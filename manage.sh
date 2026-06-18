@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  اَل من خورا (AleManKhora) — management console
+#  اَلِ من خورا (AleManKhora) — management console
 #  Run:  ./manage.sh            (interactive menu)
 #        ./manage.sh <command>  (non-interactive)
 #  Commands: install | update | start | stop | restart | status | logs
@@ -332,7 +332,7 @@ cmd_uninstall() {
 menu() {
   while true; do
     echo
-    printf "${C_B}══════════ اَل من خورا — کنسول مدیریت ══════════${C_0}\n"
+    printf "${C_B}══════════ اَلِ من خورا — کنسول مدیریت ══════════${C_0}\n"
     if is_running; then printf "  وضعیت: ${C_G}در حال اجرا${C_0}  پورت: %s\n" "$(get_port)";
     else printf "  وضعیت: ${C_Y}متوقف${C_0}\n"; fi
     cat <<MENU

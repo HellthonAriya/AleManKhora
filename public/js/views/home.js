@@ -1,4 +1,4 @@
-/* اَل من خورا — Landing / home view */
+/* اَلِ من خورا — Landing / home view */
 import { h, store } from '../core.js';
 import { BoardRenderer } from '../board.js';
 import { QuoridorGame } from '../engine.js';
@@ -17,7 +17,7 @@ export function HomeView() {
         h('h1', {}, 'حرکت کن یا ', h('span', { class: 'grad' }, 'مانع بساز'),
           h('br'), 'اول به آن‌سو برس!'),
         h('p', { class: 'lead' },
-          'اَل من خورا یک نبرد فکری دونفره است: در هر نوبت یا مهره‌ات را جلو ببر یا با ساختن دیوار راه حریف را ببند. ساده برای یادگیری، عمیق برای استادشدن.'),
+          'اَلِ من خورا یک نبرد فکری دونفره است: در هر نوبت یا مهره‌ات را جلو ببر یا با ساختن دیوار راه حریف را ببند. ساده برای یادگیری، عمیق برای استادشدن.'),
         h('div', { class: 'hero-actions' },
           cta,
           h('a', { class: 'btn btn-ghost btn-lg', href: '#/leaderboard', 'data-link': true }, '🏆 جدول رتبه‌بندی'),

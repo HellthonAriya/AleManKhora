@@ -1,5 +1,5 @@
 /* =========================================================================
-   اَل من خورا — Canvas board renderer
+   اَلِ من خورا — Canvas board renderer
    Draws the Quoridor board, pawns and walls with animation, legal-move
    highlights and a live wall-placement preview. Server stays authoritative;
    the client engine is used only for instant visual feedback.
@@ -58,7 +58,7 @@ export class BoardRenderer {
   }
   setMySeat(seat) { this.mySeat = seat; this._recomputeLegal(); this.draw(); }
   setMode(mode) { this.mode = mode; this.hover = null; this._recomputeLegal(); this.draw(); }
-  setInteractive(v) { this.interactive = v; this.canvas.style.cursor = v ? 'pointer' : 'default'; this.draw(); }
+  setInteractive(v) { this.interactive = v; this.canvas.style.cursor = v ? 'pointer' : 'default'; this._recomputeLegal(); this.draw(); }
 
   setState(state, { animate = true } = {}) {
     const prev = this.state;

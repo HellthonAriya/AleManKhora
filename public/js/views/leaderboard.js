@@ -1,10 +1,10 @@
-/* اَل من خورا — Leaderboard */
+/* اَلِ من خورا — Leaderboard */
 import { h, api, faNum, initials } from '../core.js';
 
 export async function LeaderboardView() {
   const mount = h('div', { class: 'fade-in' },
     h('h1', { class: 'section-title' }, '🏆 جدول رتبه‌بندی'),
-    h('p', { class: 'section-sub' }, 'برترین بازیکنان اَل من خورا بر اساس امتیاز ELO.'),
+    h('p', { class: 'section-sub' }, 'برترین بازیکنان اَلِ من خورا بر اساس امتیاز ELO.'),
     h('div', { class: 'loading-wrap' }, h('div', { class: 'spinner' }), 'در حال بارگذاری…'),
   );
 
