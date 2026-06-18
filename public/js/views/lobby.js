@@ -1,6 +1,7 @@
 /* اَلِ من خورا — Lobby: choose a game, a mode, customize, and start playing */
 import { h, store, toast, modal, faNum, $ } from '../core.js';
 import { makeCustomizer } from '../components.js';
+import { openRules } from '../rules.js';
 import { getSocket, navigate } from '../app.js';
 
 const GAMES = [
@@ -92,7 +93,9 @@ export function LobbyView() {
       statsPills,
     ),
     h('div', { style: 'margin-top:22px' },
-      h('div', { class: 'card-title', style: 'margin-bottom:12px' }, '🎮 کدام بازی؟'),
+      h('div', { class: 'rules-bar' },
+        h('div', { class: 'card-title' }, '🎮 کدام بازی؟'),
+        h('button', { class: 'btn btn-sm btn-ghost', onclick: () => openRules(gameType) }, '📖 قوانین این بازی')),
       gameSelect),
     h('div', { class: 'lobby-grid', style: 'margin-top:26px' },
       h('div', { class: 'mode-list' },

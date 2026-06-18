@@ -284,6 +284,27 @@ table.tbl tr:hover td { background: rgba(255,255,255,.02); }
 .gs-ico { font-size: 1.4rem; }
 .gs-body p { color: var(--text-dim); font-size: .86rem; margin: 8px 0 0; line-height: 1.6; }
 
+/* ---- Rules button bars ---- */
+.rules-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.board-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; max-width: 640px; }
+
+/* ---- Rules modal content ---- */
+.rules-body { display: flex; flex-direction: column; gap: 18px; max-width: 640px; }
+.rules-section { border-inline-start: 3px solid var(--accent); padding-inline-start: 14px; }
+.rules-h { font-size: 1.05rem; font-weight: 800; margin: 0 0 8px; }
+.rules-p { color: var(--text); line-height: 2; margin: 0 0 6px; font-size: .94rem; }
+.rules-ul { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 7px; }
+.rules-ul li { color: var(--text); line-height: 1.9; font-size: .92rem; }
+.rules-ul li::marker { color: var(--accent); }
+.rules-tip {
+  margin-top: 10px; background: var(--accent-glow); border: 1px solid var(--accent);
+  border-radius: 12px; padding: 10px 14px; font-size: .9rem; line-height: 1.8;
+}
+.rule-pieces { display: flex; flex-direction: column; gap: 10px; }
+.rule-piece { display: flex; align-items: flex-start; gap: 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+.rp-glyph { font-size: 2rem; line-height: 1; color: var(--text); min-width: 34px; text-align: center; }
+.rp-how { color: var(--text-dim); font-size: .88rem; line-height: 1.7; margin-top: 2px; }
+
 /* ---- Profile ---- */
 .profile-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 .profile-avatar { width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center; font-size: 2rem; font-weight: 800; color: #04130d; }

@@ -3,6 +3,7 @@
 import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock, copyText } from '../core.js';
 import { BoardRenderer } from '../board.js';
 import { ChessBoardRenderer } from '../chessboard.js';
+import { openRules } from '../rules.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
 
@@ -483,7 +484,10 @@ export function GameView(roomId) {
       turnBanner,
       h('div', { class: 'board-frame' }, canvas),
       wallTray,
-      h('div', { class: 'faint' }, `اتاق: ${roomId.slice(0, 6)}`),
+      h('div', { class: 'board-foot' },
+        h('span', { class: 'faint' }, `اتاق: ${roomId.slice(0, 6)}`),
+        h('button', { class: 'btn btn-sm btn-ghost', onclick: () => openRules(gameType) }, '📖 قوانین'),
+      ),
     ),
     sideBottom,
   );
