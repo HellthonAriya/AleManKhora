@@ -53,46 +53,93 @@ function evalLeaf(g, seat) {
 
 /* ------------------------------ 2-player ---------------------------------- */
 
-function negamax(g, depth, alpha, beta, ply, budget) {
-  if (g.gameOver) {
-    if (g.draw) return 0;
-    // Side to move has been mated (the previous mover won).
-    return -(MATE - ply);
-  }
-  if (depth === 0 || budget.n <= 0) return evalLeaf(g, g.turn);
-  let best = -Infinity;
-  const moves = orderMoves(g, g.legalMoves(g.turn));
-  if (!moves.length) return evalLeaf(g, g.turn);
-  for (const m of moves) {
-    budget.n--;
-    const c = clone(g);
-    try { c.apply(c.turn, toAction(m)); } catch { continue; }
-    const score = -negamax(c, depth - 1, -beta, -alpha, ply + 1, budget);
-    if (score > best) best = score;
-    if (best > alpha) alpha = best;
-    if (alpha >= beta) break;
-    if (budget.n <= 0) break;
-  }
-  return best;
+/** A move that changes material — captures, en passant and promotions. */
+function isTactical(g, m) {
+  return !!g.board[m.to.r][m.to.c] || !!m.ep || !!m.promo;
 }
 
+const TIMEOUT = Symbol('timeout');
+const QUIESCE_CAP = 8; // max plies of forced captures to follow at a leaf
+
+/**
+ * Iterative-deepening alpha-beta with a quiescence search and a hard wall-clock
+ * deadline. The deadline matters because the AI runs synchronously on the
+ * server: a slow move would block every other game. Iterative deepening means
+ * we always have a complete result from the last finished depth even if the
+ * next depth is cut off.
+ *
+ * Quiescence search is the key to not "falling for simple tactics": rather than
+ * evaluating in the middle of a capture sequence (the horizon effect), it keeps
+ * searching forced captures until the position is quiet, so hanging pieces and
+ * simple fork / skewer / pin tactics are seen.
+ */
 function choose2p(game, seat, difficulty) {
-  const depth = difficulty === 'easy' ? 1 : difficulty === 'hard' ? 3 : 2;
-  const moves = orderMoves(game, game.legalMoves(seat));
-  if (!moves.length) return null;
-  const budget = { n: 70000 };
-  let best = null, bestScore = -Infinity;
-  const noise = difficulty === 'easy' ? 1.2 : difficulty === 'normal' ? 0.3 : 0.0;
-  for (const m of moves) {
-    const c = clone(game);
-    try { c.apply(seat, toAction(m)); } catch { continue; }
-    let score;
-    if (c.gameOver) score = c.draw ? 0 : (c.winner === seat ? MATE : -MATE);
-    else score = -negamax(c, depth - 1, -Infinity, Infinity, 1, budget);
-    score += (Math.random() - 0.5) * noise;
-    if (score > bestScore) { bestScore = score; best = m; }
+  const maxDepth = difficulty === 'easy' ? 2 : difficulty === 'hard' ? 4 : 3;
+  const timeMs = difficulty === 'easy' ? 120 : difficulty === 'hard' ? 500 : 280;
+  const quiet = difficulty !== 'easy';
+  const noise = difficulty === 'easy' ? 1.4 : difficulty === 'normal' ? 0.12 : 0.0;
+  const deadline = Date.now() + timeMs;
+  let nodes = 0;
+  const tick = () => { if ((++nodes & 1023) === 0 && Date.now() > deadline) throw TIMEOUT; };
+
+  function quiesce(g, alpha, beta, qd) {
+    if (g.gameOver) return g.draw ? 0 : -MATE;
+    let stand = evalLeaf(g, g.turn);
+    if (stand >= beta) return beta;
+    if (stand > alpha) alpha = stand;
+    if (qd <= 0) return alpha;
+    const caps = orderMoves(g, g.legalMoves(g.turn).filter((m) => isTactical(g, m)));
+    for (const m of caps) {
+      tick();
+      const c = clone(g);
+      try { c.apply(c.turn, toAction(m)); } catch { continue; }
+      const score = -quiesce(c, -beta, -alpha, qd - 1);
+      if (score >= beta) return beta;
+      if (score > alpha) alpha = score;
+    }
+    return alpha;
   }
-  return best ? toAction(best) : null;
+
+  function negamax(g, d, alpha, beta, ply) {
+    if (g.gameOver) return g.draw ? 0 : -(MATE - ply); // side to move was mated
+    if (d <= 0) return quiet ? quiesce(g, alpha, beta, QUIESCE_CAP) : evalLeaf(g, g.turn);
+    const moves = orderMoves(g, g.legalMoves(g.turn));
+    if (!moves.length) return evalLeaf(g, g.turn);
+    let best = -Infinity;
+    for (const m of moves) {
+      tick();
+      const c = clone(g);
+      try { c.apply(c.turn, toAction(m)); } catch { continue; }
+      const score = -negamax(c, d - 1, -beta, -alpha, ply + 1);
+      if (score > best) best = score;
+      if (best > alpha) alpha = best;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+
+  const rootMoves = orderMoves(game, game.legalMoves(seat));
+  if (!rootMoves.length) return null;
+  let best = rootMoves[0];
+
+  // Iterative deepening: keep the best move from the deepest fully-searched ply.
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    let bestScore = -Infinity, bestThisDepth = null, aborted = false;
+    try {
+      for (const m of rootMoves) {
+        const c = clone(game);
+        try { c.apply(seat, toAction(m)); } catch { continue; }
+        let score;
+        if (c.gameOver) score = c.draw ? 0 : (c.winner === seat ? MATE : -MATE);
+        else score = -negamax(c, depth - 1, -Infinity, Infinity, 1);
+        score += (Math.random() - 0.5) * noise;
+        if (score > bestScore) { bestScore = score; bestThisDepth = m; }
+      }
+    } catch (e) { if (e === TIMEOUT) aborted = true; else throw e; }
+    if (bestThisDepth && !aborted) best = bestThisDepth;
+    if (aborted || Date.now() > deadline) break;
+  }
+  return toAction(best);
 }
 
 /* ------------------------------ 4-player ---------------------------------- */
@@ -111,11 +158,14 @@ function bestEnemyThreat(g, seat) {
 }
 
 function choose4p(game, seat, difficulty) {
-  const moves = game.legalMoves(seat);
+  const moves = orderMoves(game, game.legalMoves(seat));
   if (!moves.length) return null;
   const noise = difficulty === 'easy' ? 2.5 : difficulty === 'normal' ? 0.8 : 0.2;
   const lookThreat = difficulty === 'hard';
-  let best = null, bestScore = -Infinity;
+  // The AI runs synchronously on the server, so cap thinking time. Moves are
+  // capture-ordered, so the strongest candidates are evaluated first.
+  const deadline = Date.now() + 450;
+  let best = moves[0], bestScore = -Infinity;
   for (const m of moves) {
     const c = clone(game);
     try { c.apply(seat, toAction(m)); } catch { continue; }
@@ -128,8 +178,9 @@ function choose4p(game, seat, difficulty) {
     }
     score += (Math.random() - 0.5) * noise;
     if (score > bestScore) { bestScore = score; best = m; }
+    if (Date.now() > deadline) break;
   }
-  return best ? toAction(best) : null;
+  return toAction(best);
 }
 
 /* -------------------------------- Entry ----------------------------------- */

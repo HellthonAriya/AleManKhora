@@ -622,6 +622,15 @@ export class ChessGame {
     this.draw = true; this.gameOver = true; this.endReason = 'draw-agreed';
   }
 
+  /** Force a winner from outside (e.g. only bots remain and can't force mate). */
+  forceWinner(seat, reason = 'resign') {
+    if (this.gameOver) return;
+    this.winner = seat;
+    this.winningTeam = this.teamOf(seat);
+    this.gameOver = true;
+    this.endReason = reason;
+  }
+
   /* ------------------------------- Material ------------------------------- */
 
   /** Net material for a seat (own pieces minus all enemies') — used by the AI. */

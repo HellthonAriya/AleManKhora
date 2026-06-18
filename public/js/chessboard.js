@@ -123,13 +123,12 @@ export class ChessBoardRenderer {
 
   /* ------------------------------ Pointer -------------------------------- */
   _bind() {
-    this.canvas.addEventListener('mousemove', (e) => this._onHover(e));
-    this.canvas.addEventListener('mouseleave', () => { this.hover = null; this.draw(); });
-    this.canvas.addEventListener('click', (e) => this._onClick(e));
-    this.canvas.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      if (e.changedTouches[0]) this._onClick(e.changedTouches[0]);
-    }, { passive: false });
+    // Pointer events unify mouse + touch and fire exactly once per tap (no 300ms
+    // "ghost click"), which is what makes tap-to-move reliable on phones. The
+    // canvas has `touch-action: none`, so taps aren't stolen by scrolling.
+    this.canvas.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') this._onHover(e); });
+    this.canvas.addEventListener('pointerleave', () => { this.hover = null; this.draw(); });
+    this.canvas.addEventListener('pointerup', (e) => this._onClick(e));
   }
   _pos(e) {
     const rect = this.canvas.getBoundingClientRect();

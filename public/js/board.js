@@ -169,10 +169,19 @@ export class BoardRenderer {
     this.canvas.addEventListener('mousemove', (e) => this._onMove(e));
     this.canvas.addEventListener('mouseleave', () => { this.hover = null; this.draw(); });
     this.canvas.addEventListener('click', (e) => this._onClick(e));
-    // touch: tap to act — prevent scroll/selection on the board
+    // Touch: preview the cell under the finger on touchstart, then COMMIT the
+    // move on touchend. We must act on touchend (not the synthesized click,
+    // which the previous preventDefault was swallowing) and preventDefault there
+    // so the move fires exactly once per tap. Scrolling and the tap highlight are
+    // already handled by CSS (touch-action:none, -webkit-tap-highlight-color).
+    // Touch events stay targeted at the canvas where the touch began, so a
+    // wall-drag that starts on the tray never triggers a move here.
     this.canvas.addEventListener('touchstart', (e) => {
+      if (e.touches[0]) this._onMove(e.touches[0]);
+    }, { passive: true });
+    this.canvas.addEventListener('touchend', (e) => {
+      if (e.changedTouches[0]) this._onClick(e.changedTouches[0]);
       e.preventDefault();
-      if (e.touches[0]) { this._onMove(e.touches[0]); }
     }, { passive: false });
   }
   _pos(e) {

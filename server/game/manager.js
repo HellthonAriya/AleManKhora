@@ -345,7 +345,7 @@ export class GameManager {
       this.scheduleFlag(room);
       this.resetIdleTimer(room);
       this.broadcast(room, 'game:clock', room.clockView());
-      this.maybeRunAI(room);
+      if (!this.maybeEndBotGame(room)) this.maybeRunAI(room);
     }
     return result;
   }
@@ -354,6 +354,35 @@ export class GameManager {
   pickAIAction(room, seat) {
     if (room.gameType === 'quoridor') return chooseAction(room.game, seat, room.aiDifficulty);
     return chooseChessAction(room.game, seat, room.aiDifficulty);
+  }
+
+  /**
+   * When every still-active player is an AI (all humans are out), bots can
+   * shuffle forever without forcing mate. End the game and declare the
+   * strongest remaining side as the winner so a result is always announced.
+   * Returns true if it ended the game.
+   */
+  maybeEndBotGame(room) {
+    if (room.status !== 'active' || room.game.isOver()) return false;
+    if (room.aiSeats.size === 0) return false;
+    const active = room.game.activePlayers();
+    if (!active.length) return false;
+    const humansLeft = active.filter((s) => !room.aiSeats.has(s));
+    if (humansLeft.length > 0) return false; // a human is still playing — let it run
+
+    // Only bots remain. Crown the leader (team-aware via material) so the
+    // result reflects who was actually ahead.
+    let winner = active[0];
+    if (typeof room.game.materialBalance === 'function') {
+      let bestMat = -Infinity;
+      for (const s of active) {
+        const m = room.game.materialBalance(s);
+        if (m > bestMat) { bestMat = m; winner = s; }
+      }
+    }
+    room.game.forceWinner?.(winner, 'bots-only');
+    this.finishGame(room, winner);
+    return true;
   }
 
   /** Remove a player from a live game (resign / timeout / abandon). */
@@ -367,7 +396,7 @@ export class GameManager {
       this.scheduleFlag(room);
       this.resetIdleTimer(room);
       this.broadcast(room, 'game:clock', room.clockView());
-      this.maybeRunAI(room);
+      if (!this.maybeEndBotGame(room)) this.maybeRunAI(room);
     }
   }
 
