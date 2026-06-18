@@ -74,9 +74,29 @@ is_running() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 
+# Find any process listening on our port (catches orphans the PID file missed).
+pids_on_port() {
+  local port; port="$(get_port)"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp 2>/dev/null | grep -oE "pid=[0-9]+" | grep -oE "[0-9]+" | while read -r pid; do
+      ss -ltnp 2>/dev/null | grep ":$port " | grep -q "pid=$pid," && echo "$pid"
+    done | sort -u
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -ti ":$port" -sTCP:LISTEN 2>/dev/null
+  fi
+}
+
 cmd_start() {
   if is_running; then ok "Already running"; return; fi
   if use_systemd; then say "Starting via systemd"; sd start "$SERVICE"; ok "Started"; return; fi
+  # Guard: clear any orphan holding our port so we don't hit EADDRINUSE.
+  local stale; stale="$(pids_on_port)"
+  if [ -n "$stale" ]; then
+    warn "Port $(get_port) in use by orphan PID(s): $stale — terminating"
+    echo "$stale" | xargs -r kill 2>/dev/null || true
+    sleep 1
+    stale="$(pids_on_port)"; [ -n "$stale" ] && echo "$stale" | xargs -r kill -9 2>/dev/null || true
+  fi
   say "Starting AleManKhora (nohup)…"
   nohup node server/index.js >>"$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
@@ -86,11 +106,19 @@ cmd_start() {
 
 cmd_stop() {
   if use_systemd; then say "Stopping via systemd"; sd stop "$SERVICE"; ok "Stopped"; return; fi
+  local stopped=0
   if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-    kill "$(cat "$PID_FILE")" && rm -f "$PID_FILE"; ok "Stopped"
-  else
-    warn "Not running"; rm -f "$PID_FILE"
+    kill "$(cat "$PID_FILE")" && stopped=1
   fi
+  rm -f "$PID_FILE"
+  # Also clean up any orphan on the port (e.g. a process the PID file lost track of).
+  local stale; stale="$(pids_on_port)"
+  if [ -n "$stale" ]; then
+    warn "Cleaning orphan(s) on port $(get_port): $stale"
+    echo "$stale" | xargs -r kill 2>/dev/null || true
+    stopped=1
+  fi
+  [ "$stopped" = "1" ] && ok "Stopped" || warn "Not running"
 }
 
 cmd_restart() { cmd_stop || true; sleep 1; cmd_start; }
