@@ -27,6 +27,15 @@ err()  { printf "${C_R}✗ %s${C_0}\n" "$*" >&2; }
 
 get_port() { grep -E '^PORT=' .env 2>/dev/null | cut -d= -f2 || echo 3000; }
 
+detect_pm() {
+  if command -v apt-get >/dev/null 2>&1; then echo apt;
+  elif command -v dnf >/dev/null 2>&1; then echo dnf;
+  elif command -v yum >/dev/null 2>&1; then echo yum;
+  elif command -v pacman >/dev/null 2>&1; then echo pacman;
+  elif command -v apk >/dev/null 2>&1; then echo apk;
+  else echo none; fi
+}
+
 have_systemd_unit() {
   command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE}.service"
 }
@@ -160,6 +169,123 @@ cmd_restore() {
   [ "$was_running" = "1" ] && cmd_start
 }
 
+# ----------------------------- nginx proxy ----------------------------------
+
+_nginx_install() {
+  command -v nginx >/dev/null 2>&1 && return 0
+  say "Installing nginx"
+  local pm; pm="$(detect_pm)"
+  case "$pm" in
+    apt)    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) apt-get update -y && \
+            $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) apt-get install -y nginx ;;
+    dnf)    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) dnf install -y nginx ;;
+    yum)    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) yum install -y nginx ;;
+    pacman) $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) pacman -Sy --noconfirm nginx ;;
+    apk)    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) apk add --no-cache nginx ;;
+    *)      err "Unknown package manager — install nginx manually."; return 1 ;;
+  esac
+}
+
+_nginx_reload() {
+  if command -v systemctl >/dev/null 2>&1; then
+    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) nginx -t && \
+    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) systemctl enable nginx 2>/dev/null || true && \
+    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) systemctl reload-or-restart nginx
+  else
+    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) nginx -t && \
+    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) service nginx reload 2>/dev/null || \
+    $( [ "$(id -u)" = "0" ] && echo "" || echo sudo ) nginx -s reload
+  fi
+}
+
+_write_nginx_conf() {
+  local domain="${1:-_}"   # _ = catch-all (IP access)
+  local port; port="$(get_port)"
+  local SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"
+  local conf_dir="/etc/nginx/sites-available"
+  local enabled_dir="/etc/nginx/sites-enabled"
+  # Fallback for distros that don't use sites-available (e.g. CentOS)
+  if [ ! -d "$conf_dir" ]; then conf_dir="/etc/nginx/conf.d"; enabled_dir=""; fi
+  local conf_file="${conf_dir}/alemankhora"
+
+  $SUDO mkdir -p "$conf_dir"
+  # Remove default site to free port 80
+  $SUDO rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+
+  say "Writing nginx config → $conf_file"
+  $SUDO tee "$conf_file" > /dev/null <<NGINX
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    # WebSocket + HTTP proxy to Node.js
+    location / {
+        proxy_pass         http://127.0.0.1:${port};
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 86400s;
+    }
+}
+NGINX
+
+  if [ -n "$enabled_dir" ]; then
+    $SUDO ln -sf "$conf_file" "${enabled_dir}/alemankhora" 2>/dev/null || true
+  fi
+}
+
+cmd_proxy() {
+  _nginx_install || return 1
+  _write_nginx_conf "_"
+  _nginx_reload && ok "Nginx active — بازی در http://IP-سرور قابل دسترسی است (بدون پورت)" || err "nginx reload failed"
+}
+
+cmd_ssl() {
+  local domain="${1:-}"
+  if [ -z "$domain" ]; then read -rp "دامین (مثال: game.example.com): " domain; fi
+  [ -z "$domain" ] && { err "دامین وارد نشد"; return 1; }
+
+  _nginx_install || return 1
+  _write_nginx_conf "$domain"
+  _nginx_reload || { err "nginx reload failed — مطمئن شو $domain به IP سرور اشاره می‌کند"; return 1; }
+
+  # Install certbot
+  if ! command -v certbot >/dev/null 2>&1; then
+    say "Installing certbot"
+    local SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"
+    if command -v snap >/dev/null 2>&1; then
+      $SUDO snap install --classic certbot 2>/dev/null && \
+      $SUDO ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
+    else
+      local pm; pm="$(detect_pm)"
+      case "$pm" in
+        apt)    $SUDO apt-get install -y certbot python3-certbot-nginx ;;
+        dnf)    $SUDO dnf install -y certbot python3-certbot-nginx ;;
+        yum)    $SUDO yum install -y certbot python3-certbot-nginx ;;
+        *)      err "certbot را به‌صورت دستی نصب کن: https://certbot.eff.org"; return 1 ;;
+      esac
+    fi
+  fi
+
+  say "Obtaining Let's Encrypt certificate for $domain …"
+  local SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"
+  $SUDO certbot --nginx -d "$domain" \
+    --non-interactive --agree-tos \
+    --register-unsafely-without-email \
+    --redirect 2>&1 || { err "certbot failed — دامین را چک کن (باید به IP سرور اشاره کند)"; return 1; }
+
+  ok "SSL فعال شد! بازی در دسترس است: https://${domain}"
+  printf "${C_B}  تمدید خودکار:${C_0} certbot renew را cron می‌کند — برای اطمینان:\n"
+  printf "   sudo certbot renew --dry-run\n"
+}
+
+# ----------------------------- uninstall ------------------------------------
+
 cmd_uninstall() {
   warn "This removes the systemd service and stops the app. Source & backups are kept."
   read -rp "Type 'yes' to continue: " confirm
@@ -195,14 +321,18 @@ menu() {
   10) تغییر پورت                 (port)
   11) ساخت داده نمونه/ادمین      (seed)
   12) حذف نصب                    (uninstall)
-   0) خروج
   ------------------------------------------------
+  13) پروکسی بدون پورت (HTTP)    (proxy)
+  14) نصب SSL با دامین           (ssl)
+  ------------------------------------------------
+   0) خروج
 MENU
     read -rp "انتخاب: " choice
     case "$choice" in
       1) cmd_install ;;  2) cmd_update ;;  3) cmd_start ;;  4) cmd_stop ;;
       5) cmd_restart ;;  6) cmd_status ;;  7) cmd_logs ;;   8) cmd_backup ;;
       9) cmd_restore ;; 10) cmd_port ;;   11) cmd_seed ;;  12) cmd_uninstall ;;
+      13) cmd_proxy ;;  14) cmd_ssl ;;
       0|q|exit) exit 0 ;;
       *) err "گزینهٔ نامعتبر" ;;
     esac
@@ -223,5 +353,7 @@ case "${1:-menu}" in
   port)      cmd_port "${2:-}" ;;
   seed)      cmd_seed ;;
   uninstall) cmd_uninstall ;;
-  *) err "Unknown command: $1"; echo "Try: install|update|start|stop|restart|status|logs|backup|restore|port|seed|uninstall"; exit 1 ;;
+  proxy)     cmd_proxy ;;
+  ssl)       cmd_ssl "${2:-}" ;;
+  *) err "Unknown command: $1"; echo "Try: install|update|start|stop|restart|status|logs|backup|restore|port|seed|uninstall|proxy|ssl [domain]"; exit 1 ;;
 esac
