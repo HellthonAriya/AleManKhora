@@ -115,11 +115,16 @@ export function LobbyView() {
   }
 
   function startQueue(config) {
-    const overlay = queueOverlay(() => socket.emit('match:cancel'));
-    socket.once('match:found', ({ roomId, seat }) => {
+    const onFound = ({ roomId, seat }) => {
       overlay.close();
       navigate(`/game/${roomId}`);
+    };
+    const overlay = queueOverlay(() => {
+      socket.off('match:found', onFound);
+      socket.emit('match:cancel');
+      // returning nothing (undefined) lets the modal close
     });
+    socket.once('match:found', onFound);
     socket.emit('match:queue', config, (res) => {
       if (res?.matched) { /* match:found will fire */ }
     });

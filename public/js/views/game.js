@@ -40,6 +40,8 @@ export function GameView(roomId) {
 
   /* ========================= Wall drag tray ========================= */
   const wallTray = h('div', { class: 'wall-tray inactive' });
+  const wallTrayGrip = h('div', { class: 'wall-tray-grip', title: 'برای جابجایی بکش' });
+  const wallTrayRow = h('div', { class: 'wall-tray-row' });
 
   function makeDragPiece(o) {
     const barCls = o === 'h' ? 'wall-piece-bar-h' : 'wall-piece-bar-v';
@@ -49,7 +51,36 @@ export function GameView(roomId) {
     return piece;
   }
 
-  wallTray.append(makeDragPiece('h'), makeDragPiece('v'));
+  wallTrayRow.append(makeDragPiece('h'), makeDragPiece('v'));
+  wallTray.append(wallTrayGrip, wallTrayRow);
+
+  /* --- Reposition the whole tray by dragging its grip --- */
+  let trayDrag = null;
+  wallTrayGrip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const rect = wallTray.getBoundingClientRect();
+    trayDrag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    wallTray.classList.add('placed');
+    wallTrayGrip.setPointerCapture?.(e.pointerId);
+    document.addEventListener('pointermove', onTrayMove);
+    document.addEventListener('pointerup', onTrayUp, { once: true });
+  });
+  function onTrayMove(e) {
+    if (!trayDrag) return;
+    const w = wallTray.offsetWidth, hgt = wallTray.offsetHeight;
+    let left = e.clientX - trayDrag.dx;
+    let top = e.clientY - trayDrag.dy;
+    // keep inside viewport
+    left = Math.max(6, Math.min(left, window.innerWidth - w - 6));
+    top = Math.max(6, Math.min(top, window.innerHeight - hgt - 6));
+    wallTray.style.left = left + 'px';
+    wallTray.style.top = top + 'px';
+    wallTray.style.bottom = 'auto';
+  }
+  function onTrayUp() {
+    trayDrag = null;
+    document.removeEventListener('pointermove', onTrayMove);
+  }
 
   let dragGhost = null;
   let dragO = null;
@@ -440,6 +471,7 @@ export function GameView(roomId) {
     if (clockTimer) clearInterval(clockTimer);
     dragGhost?.remove();
     document.removeEventListener('pointermove', onDragMove);
+    document.removeEventListener('pointermove', onTrayMove);
     voice.destroy();
     socket.emit('room:leave');
   });

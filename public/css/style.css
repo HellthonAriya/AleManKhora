@@ -326,45 +326,51 @@ table.tbl tr:hover td { background: rgba(255,255,255,.02); }
   .modal-overlay { align-items: flex-start; }
 }
 
-/* ---- Wall drag tray (floating panel) ---- */
+/* ---- Wall drag tray (floating, movable mini-panel) ---- */
 .wall-tray {
   position: fixed; z-index: 60;
-  left: 50%; bottom: 22px; transform: translateX(-50%);
-  display: flex; align-items: flex-end; gap: 24px; justify-content: center;
+  left: 50%; bottom: 20px; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   background: var(--panel-solid); border: 1px solid var(--border-strong);
-  border-radius: 18px; padding: 12px 20px;
-  box-shadow: 0 18px 50px -12px rgba(0,0,0,.75);
+  border-radius: 14px; padding: 5px 8px 8px;
+  box-shadow: 0 14px 38px -12px rgba(0,0,0,.7);
   backdrop-filter: blur(10px);
   transition: opacity .2s, transform .2s;
 }
-.wall-tray::before {
-  content: '🧱 برای ساخت دیوار بکش';
-  position: absolute; top: -26px; left: 50%; transform: translateX(-50%);
-  white-space: nowrap; font-size: .72rem; color: var(--text-dim);
-  background: var(--panel-solid); border: 1px solid var(--border);
-  padding: 3px 12px; border-radius: 999px;
+/* When the user has dragged it, JS sets left/top and this flag drops the transform */
+.wall-tray.placed { transform: none; }
+.wall-tray-grip {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  height: 16px; cursor: grab; touch-action: none; user-select: none;
+  color: var(--text-faint); font-size: .62rem; letter-spacing: 1px;
 }
-.wall-tray.inactive { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(14px); }
-@media (max-width: 560px) {
-  .wall-tray { bottom: 14px; gap: 16px; padding: 10px 16px; }
+.wall-tray-grip:active { cursor: grabbing; }
+.wall-tray-grip::before,
+.wall-tray-grip::after {
+  content: ''; width: 22px; height: 3px; border-radius: 3px;
+  background: var(--border-strong);
 }
+.wall-tray-row { display: flex; align-items: flex-end; gap: 10px; justify-content: center; }
+.wall-tray.inactive { opacity: 0; pointer-events: none; }
+.wall-tray.inactive:not(.placed) { transform: translateX(-50%) translateY(10px); }
 .wall-piece {
-  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
   cursor: grab; user-select: none; touch-action: none;
-  padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border);
-  background: var(--panel-2); font-size: .76rem; color: var(--text-dim);
+  padding: 7px 9px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--panel-2); font-size: .66rem; color: var(--text-dim);
   transition: border-color .15s, color .15s, transform .12s;
 }
+.wall-piece:active { cursor: grabbing; }
 .wall-piece:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-2px); }
 .wall-piece-bar-h {
-  width: 62px; height: 14px; border-radius: 5px;
+  width: 42px; height: 10px; border-radius: 4px;
   background: linear-gradient(90deg, #f4e7c1, #c8a84b);
-  box-shadow: 0 3px 12px rgba(0,0,0,.5);
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
 }
 .wall-piece-bar-v {
-  width: 14px; height: 62px; border-radius: 5px;
+  width: 10px; height: 42px; border-radius: 4px;
   background: linear-gradient(180deg, #f4e7c1, #c8a84b);
-  box-shadow: 0 3px 12px rgba(0,0,0,.5);
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
 }
 .drag-ghost {
   position: fixed; z-index: 9999; pointer-events: none;
