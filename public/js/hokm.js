@@ -88,6 +88,16 @@ export class HokmGame {
     this.ledSuit = null;
     this.leader = this.hakem;
 
+    // Last completed trick — kept so clients can replay it (hold the cards on
+    // the table for a couple of seconds and highlight who won) even though the
+    // live `trick` is cleared the instant a trick resolves. `trickNumber`
+    // increments on every resolved trick so the client can reliably detect a
+    // freshly completed trick.
+    this.lastTrick = [];
+    this.lastTrickWinner = null;
+    this.lastTrickLed = null;
+    this.trickNumber = 0;
+
     this.winThreshold = this.variant === '4' ? 7 : this.variant === '3' ? 9 : 14;
 
     this.winner = null;
@@ -114,6 +124,10 @@ export class HokmGame {
       leader: this.leader,
       ledSuit: this.ledSuit,
       trick: this.trick.map((t) => ({ seat: t.seat, card: { s: t.card.s, r: t.card.r } })),
+      lastTrick: this.lastTrick.map((t) => ({ seat: t.seat, card: { s: t.card.s, r: t.card.r } })),
+      lastTrickWinner: this.lastTrickWinner,
+      lastTrickLed: this.lastTrickLed,
+      trickNumber: this.trickNumber,
       hands: this.hands.map((h) => (h == null ? null : h.map((c) => ({ s: c.s, r: c.r })))),
       handCounts: this.hands.map((h) => (h == null ? 0 : h.length)),
       tricksWon: this.tricksWon.slice(),
@@ -153,6 +167,10 @@ export class HokmGame {
     g.leader = state.leader;
     g.ledSuit = state.ledSuit;
     g.trick = (state.trick || []).map((t) => ({ seat: t.seat, card: { s: t.card.s, r: t.card.r } }));
+    g.lastTrick = (state.lastTrick || []).map((t) => ({ seat: t.seat, card: { s: t.card.s, r: t.card.r } }));
+    g.lastTrickWinner = state.lastTrickWinner ?? null;
+    g.lastTrickLed = state.lastTrickLed ?? null;
+    g.trickNumber = state.trickNumber || 0;
     g.hands = (state.hands || []).map((h) =>
       h == null ? null : h.map((c) => ({ s: c.s, r: c.r })));
     g.tricksWon = (state.tricksWon || []).slice();
@@ -251,6 +269,11 @@ export class HokmGame {
 
       // Trick complete — resolve.
       const winnerSeat = this.resolveTrick();
+      // Snapshot the completed trick for client-side replay/highlight.
+      this.lastTrick = this.trick.map((t) => ({ seat: t.seat, card: { s: t.card.s, r: t.card.r } }));
+      this.lastTrickWinner = winnerSeat;
+      this.lastTrickLed = this.ledSuit;
+      this.trickNumber++;
       this.tricksWon[winnerSeat]++;
       if (this.teams) this.teamTricks[winnerSeat % 2]++;
 
