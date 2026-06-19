@@ -8,18 +8,37 @@
 import { customAlphabet } from 'nanoid';
 import { QuoridorGame } from './engine.js';
 import { ChessGame } from './chess.js';
+import { TicTacToeGame } from './tictactoe.js';
+import { GomokuGame } from './gomoku.js';
+import { OthelloGame } from './othello.js';
+import { DotsGame } from './dots.js';
+import { BackgammonGame } from './backgammon.js';
 import { chooseAction } from './ai.js';
 import { chooseChessAction } from './chessAI.js';
+import { chooseTicTacToeAction } from './tictactoeAI.js';
+import { chooseGomokuAction } from './gomokuAI.js';
+import { chooseOthelloAction } from './othelloAI.js';
+import { chooseDotsAction } from './dotsAI.js';
+import { chooseBackgammonAction } from './backgammonAI.js';
 import { Games, applyEloResult, applyEloDraw } from '../models.js';
 import db, { getSettings } from '../db.js';
 
-const GAME_TYPES = ['quoridor', 'chess', 'chess4'];
+const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
+// The simple 2-player board games that share one lightweight customizer/config.
+const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 
 /** Build the right rules engine for a (sanitized) game configuration. */
 function buildEngine(gameType, config) {
-  if (gameType === 'chess') return new ChessGame({ variant: '2' });
-  if (gameType === 'chess4') return new ChessGame({ variant: config.teams ? '4team' : '4' });
-  return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
+  switch (gameType) {
+    case 'chess': return new ChessGame({ variant: '2' });
+    case 'chess4': return new ChessGame({ variant: config.teams ? '4team' : '4' });
+    case 'tictactoe': return new TicTacToeGame();
+    case 'gomoku': return new GomokuGame({ size: config.size || 15 });
+    case 'othello': return new OthelloGame();
+    case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5 });
+    case 'backgammon': return new BackgammonGame();
+    default: return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
+  }
 }
 
 const codeGen = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
@@ -42,6 +61,41 @@ const RECONNECT_GRACE_MS = 2 * 60 * 1000; // 2 minutes
 const CHESS_BOARD_THEMES = ['classic', 'green', 'blue', 'wood', 'gray', 'midnight'];
 const CHESS_COLORS_2 = ['#f3f1ea', '#2b2b30'];
 const CHESS_COLORS_4 = ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'];
+
+// Default piece colours for the simple 2-player board games.
+const SIMPLE_DEFAULT_COLORS = {
+  tictactoe: ['#36c6ff', '#ff6b6b'],
+  gomoku: ['#1b1d22', '#f1ece0'],
+  othello: ['#1b1d22', '#f1ece0'],
+  dots: ['#36c6ff', '#ff6b6b'],
+  backgammon: ['#efe9dc', '#21242b'],
+};
+const GOMOKU_SIZES = [13, 15, 19];
+const DOTS_SIZES = [4, 5, 6, 7];
+
+function sanitizeSimpleConfig(cfg, gameType) {
+  const colorRe = /^#[0-9a-fA-F]{6}$/;
+  const defaults = SIMPLE_DEFAULT_COLORS[gameType] || ['#36c6ff', '#ff6b6b'];
+  const incoming = Array.isArray(cfg.colors) ? cfg.colors : [cfg.p0Color, cfg.p1Color];
+  const colors = [0, 1].map((i) => (colorRe.test(incoming?.[i]) ? incoming[i] : defaults[i]));
+
+  const timeLimit = TIME_LIMITS.includes(parseInt(cfg.timeLimit, 10)) ? parseInt(cfg.timeLimit, 10) : 0;
+  const timeIncrement = TIME_INCREMENTS.includes(parseInt(cfg.timeIncrement, 10)) ? parseInt(cfg.timeIncrement, 10) : 0;
+
+  const out = {
+    gameType, players: 2, colors,
+    p0Color: colors[0], p1Color: colors[1],
+    timeLimit, timeIncrement, ranked: false,
+  };
+  if (gameType === 'gomoku') {
+    out.size = GOMOKU_SIZES.includes(parseInt(cfg.size, 10)) ? parseInt(cfg.size, 10) : 15;
+  }
+  if (gameType === 'dots') {
+    const n = DOTS_SIZES.includes(parseInt(cfg.rows, 10)) ? parseInt(cfg.rows, 10) : 5;
+    out.rows = n; out.cols = n;
+  }
+  return out;
+}
 
 function sanitizeChessConfig(cfg, gameType) {
   const colorRe = /^#[0-9a-fA-F]{6}$/;
@@ -67,6 +121,7 @@ function sanitizeChessConfig(cfg, gameType) {
 function sanitizeConfig(cfg = {}) {
   const gameType = GAME_TYPES.includes(cfg.gameType) ? cfg.gameType : 'quoridor';
   if (gameType === 'chess' || gameType === 'chess4') return sanitizeChessConfig(cfg, gameType);
+  if (SIMPLE_TYPES.includes(gameType)) return sanitizeSimpleConfig(cfg, gameType);
 
   const s = getSettings();
   let size = parseInt(cfg.size, 10);
@@ -352,8 +407,15 @@ export class GameManager {
 
   /** Dispatch to the right AI for this room's game type. */
   pickAIAction(room, seat) {
-    if (room.gameType === 'quoridor') return chooseAction(room.game, seat, room.aiDifficulty);
-    return chooseChessAction(room.game, seat, room.aiDifficulty);
+    switch (room.gameType) {
+      case 'chess': case 'chess4': return chooseChessAction(room.game, seat, room.aiDifficulty);
+      case 'tictactoe': return chooseTicTacToeAction(room.game, seat, room.aiDifficulty);
+      case 'gomoku': return chooseGomokuAction(room.game, seat, room.aiDifficulty);
+      case 'othello': return chooseOthelloAction(room.game, seat, room.aiDifficulty);
+      case 'dots': return chooseDotsAction(room.game, seat, room.aiDifficulty);
+      case 'backgammon': return chooseBackgammonAction(room.game, seat, room.aiDifficulty);
+      default: return chooseAction(room.game, seat, room.aiDifficulty);
+    }
   }
 
   /**

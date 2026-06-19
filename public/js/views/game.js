@@ -3,6 +3,9 @@
 import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock, copyText } from '../core.js';
 import { BoardRenderer } from '../board.js';
 import { ChessBoardRenderer } from '../chessboard.js';
+import { GridRenderer } from '../gridboard.js';
+import { DotsRenderer } from '../dotsboard.js';
+import { BackgammonRenderer } from '../backgammonboard.js';
 import { openRules } from '../rules.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
@@ -49,13 +52,20 @@ export function GameView(roomId) {
       renderer = new ChessBoardRenderer(canvas, {
         onMove: (from, to, promo) => act({ type: 'move', from, to, promo }),
       });
-      wallTray.style.display = 'none';
-    } else {
+    } else if (gameType === 'quoridor') {
       renderer = new BoardRenderer(canvas, {
         onMove: (r, c) => act({ type: 'move', r, c }),
         onWall: (r, c, o) => act({ type: 'wall', r, c, o }),
       });
+    } else if (gameType === 'dots') {
+      renderer = new DotsRenderer(canvas, { onAction: act });
+    } else if (gameType === 'backgammon') {
+      renderer = new BackgammonRenderer(canvas, { onAction: act });
+    } else {
+      // دوز / گوموکو / اوتلو — shared grid renderer (dispatches on state.gameType)
+      renderer = new GridRenderer(canvas, { onAction: act });
     }
+    if (gameType !== 'quoridor') wallTray.style.display = 'none';
     requestAnimationFrame(() => renderer._resize?.());
   }
 
@@ -98,7 +108,7 @@ export function GameView(roomId) {
   let dragGhost = null;
   let dragO = null;
   function startWallDrag(e, o) {
-    if (isChess || !isMyTurnActive() || !state || state.wallsLeft[seat] <= 0) return;
+    if (gameType !== 'quoridor' || !isMyTurnActive() || !state || state.wallsLeft[seat] <= 0) return;
     e.preventDefault();
     dragO = o;
     renderer.setMode('wall');
@@ -132,15 +142,14 @@ export function GameView(roomId) {
     renderer.clearWallPreview();
   }
   function updateWallTray() {
-    if (isChess) { wallTray.classList.add('inactive'); return; }
+    if (gameType !== 'quoridor') { wallTray.classList.add('inactive'); return; }
     const active = isMyTurnActive() && state?.wallsLeft[seat] > 0;
     wallTray.classList.toggle('inactive', !active);
   }
 
   function isMyTurnActive() {
     if (spectator || status !== 'active' || !state) return false;
-    const over = isChess ? state.gameOver : (state.winner !== null && state.winner !== undefined);
-    return !over && state.turn === seat && !state.eliminated?.[seat];
+    return !gameIsOver() && state.turn === seat && !state.eliminated?.[seat];
   }
 
   /* ========================= Voice chat ========================= */
@@ -197,7 +206,8 @@ export function GameView(roomId) {
     if (!state) return;
     ensureRenderer();
     if (isChess) renderer.setConfig({ boardTheme: config.boardTheme, colors: config.colors });
-    else renderer.setConfig({ theme: config.theme, colors: config.colors || [config.p0Color, config.p1Color, '#ffd36b', '#9b8cff'] });
+    else if (gameType === 'quoridor') renderer.setConfig({ theme: config.theme, colors: config.colors || [config.p0Color, config.p1Color, '#ffd36b', '#9b8cff'] });
+    else renderer.setConfig({ colors: config.colors || [config.p0Color, config.p1Color] });
     renderer.setMySeat(seat);
     renderer.setState(state);
     const myTurn = isMyTurnActive();
@@ -208,13 +218,16 @@ export function GameView(roomId) {
     updateWallTray();
   }
 
-  function gameIsOver() { return isChess ? !!state?.gameOver : (state?.winner !== null && state?.winner !== undefined); }
+  function gameIsOver() {
+    if (isChess) return !!state?.gameOver;
+    return (state?.winner !== null && state?.winner !== undefined) || !!state?.draw;
+  }
 
   function updateBanner(myTurn) {
     clear(turnBanner);
     if (status === 'waiting') { turnBanner.append('⏳ در انتظار حریف…'); return; }
     if (gameIsOver()) {
-      if (isChess && state.draw) { turnBanner.append('🤝 بازی مساوی شد'); return; }
+      if (state.draw) { turnBanner.append('🤝 بازی مساوی شد'); return; }
       const w = state.winner;
       if (w === null || w === undefined) { turnBanner.append('پایان بازی'); return; }
       const wname = isChess && config.teams ? TEAM_NAMES[w % 2] : (players[w]?.name || `بازیکن ${SEAT_LABELS[w]}`);
@@ -237,6 +250,33 @@ export function GameView(roomId) {
     if (!state?.board) return 0;
     for (const p of state.board) if (p && p.seat === s) v += PIECE_VALUE[p.t] || 0;
     return v;
+  }
+
+  /** Per-seat status line for the simple board games. */
+  function simpleDetail(s) {
+    const wrap = (txt) => h('div', {}, h('div', { class: 'pc-walls' }, txt));
+    switch (gameType) {
+      case 'othello': return wrap(`⬤ ${faNum(state.scores?.[s] ?? 0)} مهره`);
+      case 'dots': return wrap(`▦ ${faNum(state.scores?.[s] ?? 0)} خانه`);
+      case 'backgammon': return wrap(`✓ ${faNum(state.off?.[s] ?? 0)} از ۱۵`);
+      case 'tictactoe': return wrap(s === 0 ? '✕' : '◯');
+      case 'gomoku': return wrap(s === 0 ? '● سیاه' : '○ سفید');
+      default: return h('div', {});
+    }
+  }
+
+  /** One-line how-to-play hint shown in the turn-control card. */
+  function hintFor() {
+    switch (gameType) {
+      case 'chess': case 'chess4': return 'مهرهٔ خود را انتخاب کن و روی خانهٔ مقصد بزن.';
+      case 'quoridor': return '🚶 روی نقطه کلیک کن تا حرکت کنی.\n🧱 دیوار را از پایین صفحه به روی تخته بکش.';
+      case 'tictactoe': return 'روی یک خانهٔ خالی بزن تا علامتت را بگذاری. سه‌تا در یک خط ببر.';
+      case 'gomoku': return 'روی تقاطع خالی بزن تا مهره بگذاری. اولین نفری که پنج‌تا در یک خط کند می‌برد.';
+      case 'othello': return 'روی خانه‌های نشان‌دار بزن تا مهرهٔ حریف را بین مهره‌هایت بگیری و برگردانی.';
+      case 'dots': return 'روی خط بین دو نقطه بزن. هر مربعی که کامل کنی مال توست و دوباره نوبت توست.';
+      case 'backgammon': return 'اول روی مهرهٔ خودت بزن، بعد روی خانهٔ مقصدِ نشان‌دار. تاس‌ها خودکار ریخته می‌شوند.';
+      default: return '';
+    }
   }
 
   function renderPlayerCards() {
@@ -263,11 +303,13 @@ export function GameView(roomId) {
           inChk ? h('span', { class: 'badge badge-check' }, 'کیش') : null,
           config.teams ? h('span', { class: 'faint', style: 'margin-inline-start:6px' }, TEAM_NAMES[s % 2]) : null,
         );
-      } else {
+      } else if (gameType === 'quoridor') {
         const wallsLeft = state.wallsLeft[s];
         const dots = h('div', { class: 'walls-dots' });
         for (let i = 0; i < state.wallsEach; i++) dots.append(h('i', { class: i < wallsLeft ? '' : 'used' }));
         detail = h('div', {}, h('div', { class: 'pc-walls' }, `🧱 ${faNum(wallsLeft)} دیوار`), dots);
+      } else {
+        detail = simpleDetail(s);
       }
 
       playerCardsMount.append(h('div', { class: 'player-card' + (isTurn ? ' turn' : '') + (isEliminated ? ' eliminated' : '') },
@@ -307,14 +349,11 @@ export function GameView(roomId) {
       return;
     }
     if (status === 'active') {
-      const hint = isChess
-        ? 'مهرهٔ خود را انتخاب کن و روی خانهٔ مقصد بزن.'
-        : '🚶 روی نقطه کلیک کن تا حرکت کنی.\n🧱 دیوار را از پایین صفحه به روی تخته بکش.';
       const card = h('div', { class: 'card' },
         h('div', { class: 'card-title' }, 'کنترل نوبت'),
-        h('p', { class: 'hint-line', style: 'margin-bottom:10px' }, hint),
+        h('p', { class: 'hint-line', style: 'margin-bottom:10px' }, hintFor()),
       );
-      if (!isChess && state.wallsLeft[seat] <= 0) card.append(h('p', { class: 'faint' }, 'دیوارهایت تمام شده است.'));
+      if (gameType === 'quoridor' && state.wallsLeft[seat] <= 0) card.append(h('p', { class: 'faint' }, 'دیوارهایت تمام شده است.'));
       if (isChess && numPlayers === 2) {
         card.append(h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:6px', onclick: offerDraw }, '🤝 پیشنهاد مساوی'));
       }

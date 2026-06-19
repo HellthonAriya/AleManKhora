@@ -4,12 +4,23 @@ import { BoardRenderer } from './board.js';
 import { QuoridorGame } from './engine.js';
 import { ChessBoardRenderer, BOARD_THEMES } from './chessboard.js';
 import { ChessGame } from './chess.js';
+import { GridRenderer } from './gridboard.js';
+import { DotsRenderer } from './dotsboard.js';
+import { BackgammonRenderer } from './backgammonboard.js';
+import { TicTacToeGame } from './tictactoe.js';
+import { GomokuGame } from './gomoku.js';
+import { OthelloGame } from './othello.js';
+import { DotsGame } from './dots.js';
+import { BackgammonGame } from './backgammon.js';
 
 const CHESS_SWATCHES = ['#f3f1ea', '#2b2b30', '#e7503a', '#3d7fe0', '#e8b730', '#3bb15f', '#9b8cff', '#36c6ff'];
+const SIMPLE_SWATCHES = ['#1b1d22', '#f1ece0', '#efe9dc', '#36c6ff', '#ff6b6b', '#ffd36b', '#3bb15f', '#9b8cff', '#e7503a'];
+const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 
 /** Pick the right customizer for a game type. Returns { element, getConfig }. */
 export function makeCustomizer(gameType, opts = {}) {
   if (gameType === 'chess' || gameType === 'chess4') return ChessCustomizer({ gameType, ...opts });
+  if (SIMPLE_TYPES.includes(gameType)) return SimpleCustomizer({ gameType, ...opts });
   return GameCustomizer(opts);
 }
 
@@ -273,6 +284,130 @@ export function ChessCustomizer({ gameType = 'chess', showRanked = true } = {}) 
   return {
     element,
     getConfig: () => ({ ...cfg, colors: [...cfg.colors.slice(0, cfg.players)] }),
+  };
+}
+
+const SIMPLE_DEFAULT_COLORS = {
+  tictactoe: ['#36c6ff', '#ff6b6b'],
+  gomoku: ['#1b1d22', '#f1ece0'],
+  othello: ['#1b1d22', '#f1ece0'],
+  dots: ['#36c6ff', '#ff6b6b'],
+  backgammon: ['#efe9dc', '#21242b'],
+};
+const SIMPLE_NAMES = {
+  tictactoe: 'دوز', gomoku: 'گوموکو', othello: 'اوتلو', dots: 'نقطه‌خط', backgammon: 'تخته‌نرد',
+};
+
+/**
+ * Lightweight customizer for the simple 2-player board games: two piece
+ * colours, time control, an optional board-size choice (gomoku / dots) and a
+ * live preview. Returns { element, getConfig }.
+ */
+export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
+  const cfg = {
+    gameType,
+    colors: [...(SIMPLE_DEFAULT_COLORS[gameType] || ['#36c6ff', '#ff6b6b'])],
+    size: gameType === 'gomoku' ? 15 : gameType === 'dots' ? 5 : 0,
+    timeLimit: 0,
+    timeIncrement: 0,
+  };
+
+  const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
+  let renderer = null;
+  function buildEngine() {
+    if (gameType === 'gomoku') return new GomokuGame({ size: cfg.size });
+    if (gameType === 'othello') return new OthelloGame();
+    if (gameType === 'tictactoe') return new TicTacToeGame();
+    if (gameType === 'dots') return new DotsGame({ rows: cfg.size, cols: cfg.size });
+    return new BackgammonGame();
+  }
+  function buildRenderer() {
+    if (gameType === 'dots') return new DotsRenderer(previewCanvas);
+    if (gameType === 'backgammon') return new BackgammonRenderer(previewCanvas);
+    return new GridRenderer(previewCanvas);
+  }
+  function seed(g) {
+    const n = gameType === 'gomoku' ? 5 : gameType === 'othello' ? 6 : gameType === 'dots' ? 7 : gameType === 'tictactoe' ? 3 : 0;
+    for (let i = 0; i < n; i++) {
+      const moves = g.legalMoves(g.turn);
+      if (!moves.length || g.isOver()) break;
+      try { g.apply(g.turn, moves[Math.floor(Math.random() * moves.length)]); } catch { break; }
+    }
+  }
+  function refreshPreview() {
+    if (!renderer) renderer = buildRenderer();
+    const g = buildEngine();
+    seed(g);
+    renderer.setConfig({ colors: [...cfg.colors] });
+    renderer.setMySeat(0);
+    renderer.setState(g.toState(), { animate: false });
+  }
+
+  /* --- board size (gomoku / dots) --- */
+  const sizeMount = h('div', {});
+  if (gameType === 'gomoku' || gameType === 'dots') {
+    const opts = gameType === 'gomoku'
+      ? [{ label: '۱۳×۱۳', value: 13 }, { label: '۱۵×۱۵', value: 15 }, { label: '۱۹×۱۹', value: 19 }]
+      : [{ label: '۴×۴', value: 4 }, { label: '۵×۵', value: 5 }, { label: '۶×۶', value: 6 }, { label: '۷×۷', value: 7 }];
+    sizeMount.append(optGroup('اندازهٔ تخته',
+      seg(opts.map((o) => ({ ...o, active: o.value === cfg.size })), (v) => { cfg.size = v; refreshPreview(); })));
+  }
+
+  /* --- piece colours --- */
+  const colorsMount = h('div', {});
+  function colorPick(idx) {
+    const wrap = h('div', { class: 'swatches' });
+    SIMPLE_SWATCHES.forEach((col) => {
+      wrap.append(h('div', {
+        class: 'swatch' + (col === cfg.colors[idx] ? ' active' : ''),
+        style: `background:${col}`,
+        onclick: () => { cfg.colors[idx] = col; [...wrap.children].forEach((c, i) => c.classList.toggle('active', SIMPLE_SWATCHES[i] === col)); pickInput.value = col; refreshPreview(); },
+      }));
+    });
+    const pickInput = h('input', { type: 'color', value: cfg.colors[idx],
+      oninput: (e) => { cfg.colors[idx] = e.target.value; [...wrap.children].forEach((c) => c.classList.remove('active')); refreshPreview(); } });
+    wrap.append(h('div', { class: 'color-pick' }, pickInput));
+    return wrap;
+  }
+  const labelFor = (i) => {
+    if (gameType === 'tictactoe') return i === 0 ? 'رنگ ✕ (تو)' : 'رنگ ◯ (حریف)';
+    if (gameType === 'gomoku') return i === 0 ? 'رنگ مهره‌های تو' : 'رنگ مهره‌های حریف';
+    if (gameType === 'othello') return i === 0 ? 'رنگ مهره‌های تو' : 'رنگ مهره‌های حریف';
+    if (gameType === 'backgammon') return i === 0 ? 'رنگ مهره‌های تو' : 'رنگ مهره‌های حریف';
+    return i === 0 ? 'رنگ تو' : 'رنگ حریف';
+  };
+  colorsMount.append(optGroup(labelFor(0), colorPick(0)), optGroup(labelFor(1), colorPick(1)));
+
+  /* --- time control --- */
+  const timeSeg = seg(TIME_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeLimit })),
+    (v) => { cfg.timeLimit = v; incMount.style.display = v ? '' : 'none'; });
+  const incMount = h('div', { style: 'display:none' },
+    optGroup('پاداش زمانی هر حرکت', seg(INC_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeIncrement })),
+      (v) => { cfg.timeIncrement = v; })));
+
+  const leftCol = h('div', { style: 'flex:1.2' },
+    sizeMount,
+    optGroup('کنترل زمان (تایمر)', timeSeg),
+    incMount,
+    colorsMount,
+  );
+
+  const element = h('div', { class: 'row', style: 'align-items:flex-start' },
+    leftCol,
+    h('div', { style: 'flex:1' },
+      h('label', { class: 'opt-group', style: 'display:block;color:var(--text-dim);font-size:.82rem;font-weight:700;margin-bottom:9px' }, 'پیش‌نمایش زنده'),
+      previewCanvas),
+  );
+
+  requestAnimationFrame(refreshPreview);
+  return {
+    element,
+    getConfig: () => {
+      const out = { gameType, colors: [...cfg.colors], timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement };
+      if (gameType === 'gomoku') out.size = cfg.size;
+      if (gameType === 'dots') { out.rows = cfg.size; out.cols = cfg.size; }
+      return out;
+    },
   };
 }
 

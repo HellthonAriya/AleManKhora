@@ -4,6 +4,22 @@ import { BoardRenderer } from '../board.js';
 import { QuoridorGame } from '../engine.js';
 import { ChessBoardRenderer } from '../chessboard.js';
 import { ChessGame } from '../chess.js';
+import { GridRenderer } from '../gridboard.js';
+import { DotsRenderer } from '../dotsboard.js';
+import { BackgammonRenderer } from '../backgammonboard.js';
+import { TicTacToeGame } from '../tictactoe.js';
+import { GomokuGame } from '../gomoku.js';
+import { OthelloGame } from '../othello.js';
+import { DotsGame } from '../dots.js';
+import { BackgammonGame } from '../backgammon.js';
+
+const SIMPLE_COLORS = {
+  tictactoe: ['#36c6ff', '#ff6b6b'],
+  gomoku: ['#1b1d22', '#f1ece0'],
+  othello: ['#1b1d22', '#f1ece0'],
+  dots: ['#36c6ff', '#ff6b6b'],
+  backgammon: ['#efe9dc', '#21242b'],
+};
 
 export function HomeView() {
   const cta = store.me
@@ -13,6 +29,11 @@ export function HomeView() {
   const chessPrev = h('canvas', { class: 'game-prev-canvas' });
   const chess4Prev = h('canvas', { class: 'game-prev-canvas' });
   const quoridorPrev = h('canvas', { class: 'game-prev-canvas' });
+  const backgammonPrev = h('canvas', { class: 'game-prev-canvas' });
+  const othelloPrev = h('canvas', { class: 'game-prev-canvas' });
+  const gomokuPrev = h('canvas', { class: 'game-prev-canvas' });
+  const dotsPrev = h('canvas', { class: 'game-prev-canvas' });
+  const tttPrev = h('canvas', { class: 'game-prev-canvas' });
 
   const view = h('div', { class: 'fade-in' },
     h('section', { class: 'hero' },
@@ -34,6 +55,11 @@ export function HomeView() {
         gameCard(quoridorPrev, '🧱', 'اَلِ من خورا', 'در هر نوبت یا مهره‌ات را جلو ببر یا با دیوار راه حریف را ببند.'),
         gameCard(chessPrev, '♛', 'شطرنج', 'نبرد کلاسیک دو نفره با تمام قوانین: قلعه، آن‌پاسان و ارتقا.'),
         gameCard(chess4Prev, '♞', 'شطرنج ۴ نفره', 'تخته صلیبی ۱۴×۱۴، چهار ارتش — انفرادی یا تیمی ۲ در ۲.'),
+        gameCard(backgammonPrev, '🎲', 'تخته‌نرد', 'تاس بریز، مهره‌ها را به خانه ببر و اول از همه خارج‌شان کن.'),
+        gameCard(othelloPrev, '⚫', 'اوتلو', 'مهره بگذار، ردیف حریف را محاصره کن و به رنگ خودت برگردان.'),
+        gameCard(gomokuPrev, '⬤', 'گوموکو', 'پنج مهره پشت‌سرهم در یک خط بچین تا ببری.'),
+        gameCard(dotsPrev, '▦', 'نقطه‌خط', 'خط بکش و مربع ببند؛ هر مربع که بستی دوباره نوبت توست.'),
+        gameCard(tttPrev, '✕', 'دوز', 'سه علامت در یک خط — سادهٔ سریع و دوست‌داشتنی.'),
       ),
     ),
 
@@ -51,6 +77,11 @@ export function HomeView() {
     animateQuoridorPreview(quoridorPrev);
     animateChessPreview(chessPrev, '2');
     animateChessPreview(chess4Prev, '4');
+    animateSimplePreview(backgammonPrev, 'backgammon');
+    animateSimplePreview(othelloPrev, 'othello');
+    animateSimplePreview(gomokuPrev, 'gomoku');
+    animateSimplePreview(dotsPrev, 'dots');
+    animateSimplePreview(tttPrev, 'tictactoe');
   });
   return view;
 }
@@ -206,4 +237,48 @@ function animateChessPreview(canvas, variant) {
     setTimeout(step, is4 ? 750 : 900);
   };
   setTimeout(step, 900);
+}
+
+/* ---------- Simple board-game animated previews ---------- */
+
+function buildSimpleEngine(gameType) {
+  if (gameType === 'gomoku') return new GomokuGame({ size: 11 });
+  if (gameType === 'othello') return new OthelloGame();
+  if (gameType === 'tictactoe') return new TicTacToeGame();
+  if (gameType === 'dots') return new DotsGame({ rows: 5, cols: 5 });
+  return new BackgammonGame();
+}
+function buildSimpleRenderer(canvas, gameType) {
+  if (gameType === 'dots') return new DotsRenderer(canvas);
+  if (gameType === 'backgammon') return new BackgammonRenderer(canvas);
+  return new GridRenderer(canvas);
+}
+
+function animateSimplePreview(canvas, gameType) {
+  const r = buildSimpleRenderer(canvas, gameType);
+  r.setConfig({ colors: SIMPLE_COLORS[gameType] || ['#36c6ff', '#ff6b6b'] });
+  r.setMySeat(0);
+
+  let g, moves = 0;
+  const cap = gameType === 'tictactoe' ? 9 : gameType === 'gomoku' ? 45
+    : gameType === 'dots' ? 70 : gameType === 'othello' ? 64 : 60;
+
+  const newGame = () => { g = buildSimpleEngine(gameType); moves = 0; r.setState(g.toState(), { animate: false }); };
+  newGame();
+
+  const restart = () => { if (isGone(canvas)) return; newGame(); setTimeout(step, 800); };
+
+  const step = () => {
+    if (isGone(canvas)) return;
+    try {
+      if (g.isOver() || moves >= cap) { setTimeout(restart, 1600); return; }
+      const ms = g.legalMoves(g.turn);
+      if (!ms.length) { setTimeout(restart, 1600); return; }
+      g.apply(g.turn, ms[Math.floor(Math.random() * ms.length)]);
+      moves++;
+      r.setState(g.toState());
+    } catch {}
+    setTimeout(step, gameType === 'backgammon' ? 700 : 850);
+  };
+  setTimeout(step, 700);
 }

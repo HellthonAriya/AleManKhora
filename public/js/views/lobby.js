@@ -8,6 +8,11 @@ const GAMES = [
   { id: 'quoridor', icon: '🧱', name: 'اَلِ من خورا', desc: 'حرکت کن یا دیوار بساز' },
   { id: 'chess', icon: '♛', name: 'شطرنج', desc: 'نبرد کلاسیک دو نفره' },
   { id: 'chess4', icon: '♞', name: 'شطرنج ۴ نفره', desc: 'تخته صلیبی، ۴ ارتش' },
+  { id: 'backgammon', icon: '🎲', name: 'تخته‌نرد', desc: 'تاس بریز، مهره‌ها را خارج کن' },
+  { id: 'othello', icon: '⚫', name: 'اوتلو', desc: 'مهره‌ها را برگردان، اکثریت بگیر' },
+  { id: 'gomoku', icon: '⬤', name: 'گوموکو', desc: 'پنج مهره در یک خط' },
+  { id: 'dots', icon: '▦', name: 'نقطه‌خط', desc: 'خط بکش، مربع بساز' },
+  { id: 'tictactoe', icon: '✕', name: 'دوز', desc: 'سه‌تا در یک خط' },
 ];
 function gameLabel(id) { const g = GAMES.find((x) => x.id === id); return g ? `${g.icon} ${g.name}` : id; }
 
@@ -56,8 +61,9 @@ export function LobbyView() {
         acc.push(el); return acc;
       }, []);
     const gt = g.gameType || 'quoridor';
-    const typeLabel = gt === 'chess' ? '♛ شطرنج'
-      : gt === 'chess4' ? (g.teams ? '♞ شطرنج ۴ تیمی' : '♞ شطرنج ۴ نفره')
+    const gdef = GAMES.find((x) => x.id === gt);
+    const typeLabel = gt === 'chess4' && g.teams ? '♞ شطرنج ۴ تیمی'
+      : gdef ? `${gdef.icon} ${gdef.name}`
       : '🧱 اَلِ من خورا';
     const meta = gt === 'quoridor'
       ? `${typeLabel} · ${faNum(g.size)}×${faNum(g.size)} · ${faNum(g.moveCount)} حرکت`

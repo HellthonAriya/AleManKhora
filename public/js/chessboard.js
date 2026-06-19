@@ -355,26 +355,28 @@ export class ChessBoardRenderer {
   _drawPiece(p, cx, cy, cell) {
     const ctx = this.ctx;
     const color = this._seatColor(p.seat);
-    const light = this._luminance(color) > 0.55;
-    const outline = light ? 'rgba(20,20,25,.92)' : 'rgba(245,245,250,.92)';
-    const size = cell * 0.82;
+    // Each piece is ONE solid colour. A bold, fixed contrasting border (light
+    // border for dark pieces, dark border for light pieces) makes that single
+    // colour read clearly on any board square — no shadow blends, no mixed
+    // tones. The glyph is stroked first (the border becomes a halo) then filled.
+    const dark = this._luminance(color) < 0.5;
+    const border = dark ? 'rgba(250,250,253,.96)' : 'rgba(16,16,20,.96)';
+    const size = cell * 0.84;
     ctx.save();
     ctx.font = `${size}px "Segoe UI Symbol","Apple Symbols","Noto Sans Symbols2","DejaVu Sans",sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
     const glyph = GLYPH[p.t] || '?';
     const oy = cy + cell * 0.02;
-    // soft drop shadow
-    ctx.shadowColor = 'rgba(0,0,0,.45)';
-    ctx.shadowBlur = cell * 0.08;
-    ctx.shadowOffsetY = cell * 0.03;
+    // Bold contrasting halo/border.
+    ctx.lineWidth = Math.max(2, cell * 0.12);
+    ctx.strokeStyle = border;
+    ctx.strokeText(glyph, cx, oy);
+    // Solid single-colour body.
     ctx.fillStyle = color;
     ctx.fillText(glyph, cx, oy);
-    ctx.shadowColor = 'transparent';
-    // crisp outline for contrast
-    ctx.lineWidth = Math.max(1.2, cell * 0.028);
-    ctx.strokeStyle = outline;
-    ctx.strokeText(glyph, cx, oy);
     ctx.restore();
   }
 
