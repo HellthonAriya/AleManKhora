@@ -3,7 +3,7 @@ import { h, PLAYER_COLORS, THEMES, store } from './core.js';
 import { BoardRenderer } from './board.js';
 import { QuoridorGame } from './engine.js';
 import { ChessBoardRenderer, BOARD_THEMES } from './chessboard.js';
-import { ChessGame } from './chess.js';
+import { ChessGame, randomChessSetup } from './chess.js';
 import { GridRenderer } from './gridboard.js';
 import { DotsRenderer } from './dotsboard.js';
 import { BackgammonRenderer } from './backgammonboard.js';
@@ -19,7 +19,7 @@ const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 
 /** Pick the right customizer for a game type. Returns { element, getConfig }. */
 export function makeCustomizer(gameType, opts = {}) {
-  if (gameType === 'chess' || gameType === 'chess4') return ChessCustomizer({ gameType, ...opts });
+  if (gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade') return ChessCustomizer({ gameType, ...opts });
   if (SIMPLE_TYPES.includes(gameType)) return SimpleCustomizer({ gameType, ...opts });
   return GameCustomizer(opts);
 }
@@ -184,6 +184,7 @@ export function GameCustomizer({ showRanked = true, allowPlayers = true } = {}) 
  */
 export function ChessCustomizer({ gameType = 'chess', showRanked = true } = {}) {
   const is4 = gameType === 'chess4';
+  const isZade = gameType === 'chesszade';
   const cfg = {
     gameType,
     players: is4 ? 4 : 2,
@@ -192,7 +193,9 @@ export function ChessCustomizer({ gameType = 'chess', showRanked = true } = {}) 
     colors: is4 ? ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'] : ['#f3f1ea', '#2b2b30'],
     timeLimit: 0,
     timeIncrement: 0,
-    ranked: !is4 && !!store.isLoggedIn,
+    ranked: !is4 && !isZade && !!store.isLoggedIn,
+    randomPawns: false,
+    mirror: true,
   };
 
   const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
@@ -200,7 +203,9 @@ export function ChessCustomizer({ gameType = 'chess', showRanked = true } = {}) 
   function refreshPreview() {
     if (!renderer) renderer = new ChessBoardRenderer(previewCanvas);
     const variant = is4 ? (cfg.teams ? '4team' : '4') : '2';
-    const g = new ChessGame({ variant });
+    const g = isZade
+      ? new ChessGame({ variant: '2', setup: randomChessSetup({ randomPawns: cfg.randomPawns, mirror: cfg.mirror }) })
+      : new ChessGame({ variant });
     renderer.setConfig({ boardTheme: cfg.boardTheme, colors: [...cfg.colors] });
     renderer.setMySeat(0);
     renderer.setState(g.toState(), { animate: false });
@@ -211,6 +216,19 @@ export function ChessCustomizer({ gameType = 'chess', showRanked = true } = {}) 
     { label: 'هرکس برای خودش', value: false, active: true },
     { label: 'تیمی ۲ در ۲', value: true, active: false },
   ], (v) => { cfg.teams = v; refreshPreview(); }) : null;
+
+  /* --- شطرنج زاده‌ای options --- */
+  const zadeBox = isZade ? h('div', {},
+    optGroup('چیدمان', seg([
+      { label: 'فقط مهره‌های عقب تصادفی', value: false, active: true },
+      { label: 'سربازها هم تصادفی', value: true, active: false },
+    ], (v) => { cfg.randomPawns = v; refreshPreview(); })),
+    optGroup('تقارن', seg([
+      { label: 'آینه‌ای (هر دو طرف یکسان)', value: true, active: true },
+      { label: 'نامتقارن (هر طرف جدا)', value: false, active: false },
+    ], (v) => { cfg.mirror = v; refreshPreview(); })),
+    h('button', { class: 'btn btn-sm btn-ghost', style: 'margin-top:4px', onclick: refreshPreview }, '🎲 یک چیدمان دیگر'),
+  ) : null;
 
   /* --- board theme --- */
   const themeRow = h('div', { class: 'theme-row' });
@@ -266,6 +284,7 @@ export function ChessCustomizer({ gameType = 'chess', showRanked = true } = {}) 
 
   const leftCol = h('div', { style: 'flex:1.2' },
     is4 ? optGroup('حالت بازی', modeSeg) : null,
+    zadeBox,
     optGroup('تم تخته', themeRow),
     optGroup('کنترل زمان (تایمر شطرنجی)', timeSeg),
     incMount,

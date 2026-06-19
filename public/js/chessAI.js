@@ -47,7 +47,101 @@ function centerScore(g, seat) {
   return s;
 }
 
+/* --------------------------- Positional evaluation ------------------------ */
+/**
+ * Piece-square tables (Michniewski's "simplified evaluation"), in centipawns,
+ * written from white's view with rank 8 first — which maps directly onto our
+ * board rows for seat 0 (row 0 = top). Seat 1 reads them with the rank flipped.
+ * Adding PSTs to plain material is what lifts the hard bot to a solid ~1500:
+ * it develops pieces, fights for the centre, advances pawns sensibly and keeps
+ * its king tucked away instead of shuffling material aimlessly.
+ */
+const PST = {
+  p: [
+    0, 0, 0, 0, 0, 0, 0, 0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+    5, 5, 10, 25, 25, 10, 5, 5,
+    0, 0, 0, 20, 20, 0, 0, 0,
+    5, -5, -10, 0, 0, -10, -5, 5,
+    5, 10, 10, -20, -20, 10, 10, 5,
+    0, 0, 0, 0, 0, 0, 0, 0,
+  ],
+  n: [
+    -50, -40, -30, -30, -30, -30, -40, -50,
+    -40, -20, 0, 0, 0, 0, -20, -40,
+    -30, 0, 10, 15, 15, 10, 0, -30,
+    -30, 5, 15, 20, 20, 15, 5, -30,
+    -30, 0, 15, 20, 20, 15, 0, -30,
+    -30, 5, 10, 15, 15, 10, 5, -30,
+    -40, -20, 0, 5, 5, 0, -20, -40,
+    -50, -40, -30, -30, -30, -30, -40, -50,
+  ],
+  b: [
+    -20, -10, -10, -10, -10, -10, -10, -20,
+    -10, 0, 0, 0, 0, 0, 0, -10,
+    -10, 0, 5, 10, 10, 5, 0, -10,
+    -10, 5, 5, 10, 10, 5, 5, -10,
+    -10, 0, 10, 10, 10, 10, 0, -10,
+    -10, 10, 10, 10, 10, 10, 10, -10,
+    -10, 5, 0, 0, 0, 0, 5, -10,
+    -20, -10, -10, -10, -10, -10, -10, -20,
+  ],
+  r: [
+    0, 0, 0, 0, 0, 0, 0, 0,
+    5, 10, 10, 10, 10, 10, 10, 5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    0, 0, 0, 5, 5, 0, 0, 0,
+  ],
+  q: [
+    -20, -10, -10, -5, -5, -10, -10, -20,
+    -10, 0, 0, 0, 0, 0, 0, -10,
+    -10, 0, 5, 5, 5, 5, 0, -10,
+    -5, 0, 5, 5, 5, 5, 0, -5,
+    0, 0, 5, 5, 5, 5, 0, -5,
+    -10, 5, 5, 5, 5, 5, 0, -10,
+    -10, 0, 5, 0, 0, 0, 0, -10,
+    -20, -10, -10, -5, -5, -10, -10, -20,
+  ],
+  k: [
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -20, -30, -30, -40, -40, -30, -30, -20,
+    -10, -20, -20, -20, -20, -20, -20, -10,
+    20, 20, 0, 0, 0, 0, 20, 20,
+    20, 30, 10, 0, 0, 10, 30, 20,
+  ],
+};
+
+function pstVal(t, seat, r, c) {
+  const row = seat === 0 ? r : 7 - r;
+  return PST[t][row * 8 + c] || 0;
+}
+
+/** Material (centipawns) + piece-square evaluation for the 8×8 game. */
+function eval2p(g, seat) {
+  let s = 0;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const p = g.board[r][c];
+      if (!p) continue;
+      const v = PIECE_VALUE[p.t] * 100 + pstVal(p.t, p.seat, r, c);
+      if (p.seat === seat) s += v; else s -= v;
+    }
+  }
+  return s;
+}
+
 function evalLeaf(g, seat) {
+  // 8×8 game uses the full positional eval (centipawns); the 14×14 cross board
+  // keeps the lighter material + centre heuristic (the PSTs are 8×8-specific).
+  if (g.numPlayers === 2) return eval2p(g, seat);
   return g.materialBalance(seat) + centerScore(g, seat);
 }
 
@@ -74,10 +168,14 @@ const QUIESCE_CAP = 8; // max plies of forced captures to follow at a leaf
  * simple fork / skewer / pin tactics are seen.
  */
 function choose2p(game, seat, difficulty) {
-  const maxDepth = difficulty === 'easy' ? 2 : difficulty === 'hard' ? 4 : 3;
-  const timeMs = difficulty === 'easy' ? 120 : difficulty === 'hard' ? 500 : 280;
+  // hard aims for ~1500: deeper iterative-deepening search (to depth 6, time
+  // permitting) over the material + piece-square evaluation, with quiescence
+  // and zero randomness. easy/normal stay shallow and a little random. Noise is
+  // in centipawns (the eval scale) so easy genuinely blunders.
+  const maxDepth = difficulty === 'easy' ? 2 : difficulty === 'hard' ? 6 : 3;
+  const timeMs = difficulty === 'easy' ? 120 : difficulty === 'hard' ? 700 : 280;
   const quiet = difficulty !== 'easy';
-  const noise = difficulty === 'easy' ? 1.4 : difficulty === 'normal' ? 0.12 : 0.0;
+  const noise = difficulty === 'easy' ? 140 : difficulty === 'normal' ? 35 : 0;
   const deadline = Date.now() + timeMs;
   let nodes = 0;
   const tick = () => { if ((++nodes & 1023) === 0 && Date.now() > deadline) throw TIMEOUT; };

@@ -3,7 +3,7 @@ import { h, store } from '../core.js';
 import { BoardRenderer } from '../board.js';
 import { QuoridorGame } from '../engine.js';
 import { ChessBoardRenderer } from '../chessboard.js';
-import { ChessGame } from '../chess.js';
+import { ChessGame, randomChessSetup } from '../chess.js';
 import { GridRenderer } from '../gridboard.js';
 import { DotsRenderer } from '../dotsboard.js';
 import { BackgammonRenderer } from '../backgammonboard.js';
@@ -28,6 +28,7 @@ export function HomeView() {
 
   const chessPrev = h('canvas', { class: 'game-prev-canvas' });
   const chess4Prev = h('canvas', { class: 'game-prev-canvas' });
+  const chesszadePrev = h('canvas', { class: 'game-prev-canvas' });
   const quoridorPrev = h('canvas', { class: 'game-prev-canvas' });
   const backgammonPrev = h('canvas', { class: 'game-prev-canvas' });
   const othelloPrev = h('canvas', { class: 'game-prev-canvas' });
@@ -55,6 +56,7 @@ export function HomeView() {
         gameCard(quoridorPrev, '🧱', 'اَلِ من خورا', 'در هر نوبت یا مهره‌ات را جلو ببر یا با دیوار راه حریف را ببند.'),
         gameCard(chessPrev, '♛', 'شطرنج', 'نبرد کلاسیک دو نفره با تمام قوانین: قلعه، آن‌پاسان و ارتقا.'),
         gameCard(chess4Prev, '♞', 'شطرنج ۴ نفره', 'تخته صلیبی ۱۴×۱۴، چهار ارتش — انفرادی یا تیمی ۲ در ۲.'),
+        gameCard(chesszadePrev, '🔀', 'شطرنج زاده‌ای', 'چیدمان تصادفیِ مهره‌ها در شروع هر بازی — شطرنجی همیشه تازه.'),
         gameCard(backgammonPrev, '🎲', 'تخته‌نرد', 'تاس بریز، مهره‌ها را به خانه ببر و اول از همه خارج‌شان کن.'),
         gameCard(othelloPrev, '⚫', 'اوتلو', 'مهره بگذار، ردیف حریف را محاصره کن و به رنگ خودت برگردان.'),
         gameCard(gomokuPrev, '⬤', 'گوموکو', 'پنج مهره پشت‌سرهم در یک خط بچین تا ببری.'),
@@ -77,6 +79,7 @@ export function HomeView() {
     animateQuoridorPreview(quoridorPrev);
     animateChessPreview(chessPrev, '2');
     animateChessPreview(chess4Prev, '4');
+    animateZadePreview(chesszadePrev);
     animateSimplePreview(backgammonPrev, 'backgammon');
     animateSimplePreview(othelloPrev, 'othello');
     animateSimplePreview(gomokuPrev, 'gomoku');
@@ -281,4 +284,34 @@ function animateSimplePreview(canvas, gameType) {
     setTimeout(step, gameType === 'backgammon' ? 700 : 850);
   };
   setTimeout(step, 700);
+}
+
+/* ---------- شطرنج زاده‌ای animated preview ---------- */
+
+function animateZadePreview(canvas) {
+  const r = new ChessBoardRenderer(canvas);
+  r.setConfig({ boardTheme: 'wood', colors: ['#f3f1ea', '#2b2b30'] });
+  let g, moves = 0;
+  const newGame = () => {
+    g = new ChessGame({ variant: '2', setup: randomChessSetup({ randomPawns: Math.random() < 0.4, mirror: Math.random() < 0.7 }) });
+    moves = 0;
+    r.setState(g.toState(), { animate: false });
+  };
+  newGame();
+  const restart = () => { if (isGone(canvas)) return; newGame(); setTimeout(step, 700); };
+  const step = () => {
+    if (isGone(canvas)) return;
+    try {
+      if (g.gameOver || moves >= 30) { setTimeout(restart, 1500); return; }
+      const ms = g.legalMoves(g.turn);
+      if (!ms.length) { setTimeout(restart, 1500); return; }
+      const caps = ms.filter((m) => g.board[m.to.r]?.[m.to.c] || m.ep);
+      const pick = caps.length && Math.random() < 0.55 ? caps[Math.floor(Math.random() * caps.length)] : ms[Math.floor(Math.random() * ms.length)];
+      g.apply(g.turn, { type: 'move', from: pick.from, to: pick.to, promo: pick.promo });
+      moves++;
+      r.setState(g.toState());
+    } catch {}
+    setTimeout(step, 900);
+  };
+  setTimeout(step, 900);
 }

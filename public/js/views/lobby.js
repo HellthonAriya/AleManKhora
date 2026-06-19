@@ -8,6 +8,7 @@ const GAMES = [
   { id: 'quoridor', icon: '🧱', name: 'اَلِ من خورا', desc: 'حرکت کن یا دیوار بساز' },
   { id: 'chess', icon: '♛', name: 'شطرنج', desc: 'نبرد کلاسیک دو نفره' },
   { id: 'chess4', icon: '♞', name: 'شطرنج ۴ نفره', desc: 'تخته صلیبی، ۴ ارتش' },
+  { id: 'chesszade', icon: '🔀', name: 'شطرنج زاده‌ای', desc: 'چیدمان تصادفی، نبرد نو' },
   { id: 'backgammon', icon: '🎲', name: 'تخته‌نرد', desc: 'تاس بریز، مهره‌ها را خارج کن' },
   { id: 'othello', icon: '⚫', name: 'اوتلو', desc: 'مهره‌ها را برگردان، اکثریت بگیر' },
   { id: 'gomoku', icon: '⬤', name: 'گوموکو', desc: 'پنج مهره در یک خط' },

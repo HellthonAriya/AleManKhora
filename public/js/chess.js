@@ -85,6 +85,10 @@ export class ChessGame {
     this.history = [];
     this.positionCounts = new Map();
 
+    // Randomized 2-player setup (شطرنج زاده‌ای): opts.setup describes the two
+    // home ranks for each seat. Castling is disabled for a shuffled back rank.
+    this.customSetup = (!this.is4 && opts.setup) ? opts.setup : null;
+
     this._setup();
   }
 
@@ -120,6 +124,19 @@ export class ChessGame {
 
   _setup() {
     if (!this.is4) {
+      if (this.customSetup) {
+        // Randomized layout. p0 fills rows 7 (back) & 6 (pawns); p1 mirrors into
+        // rows 0 & 1. Castling makes no sense on a shuffled rank — disable it.
+        const { p0, p1 } = this.customSetup;
+        for (let c = 0; c < 8; c++) {
+          this._place(7, c, p0.back[c], 0);
+          this._place(6, c, p0.pawns[c], 0);
+          this._place(0, c, p1.back[c], 1);
+          this._place(1, c, p1.pawns[c], 1);
+        }
+        this.castle = [{ k: false, q: false }, { k: false, q: false }];
+        return;
+      }
       // 2-player: white bottom (r7 back, r6 pawns), black top (r0 back, r1 pawns).
       for (let c = 0; c < 8; c++) {
         this._place(7, c, BACK_RANK[c], 0);
@@ -644,6 +661,43 @@ export class ChessGame {
     }
     return mine - foes;
   }
+}
+
+/* ---------------------------- Randomized setup ---------------------------- */
+
+function shuffle(a) {
+  const arr = [...a];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
+ * Build a randomized 2-player chess setup (شطرنج زاده‌ای).
+ * @param {object} opts
+ * @param {boolean} opts.randomPawns  if true, all 16 men (pawns + back rank) are
+ *                                    scattered across both home rows; otherwise
+ *                                    only the 8 back-rank pieces are shuffled.
+ * @param {boolean} opts.mirror       if true (default) the opponent's setup is
+ *                                    the same per file (Chess960-style symmetry);
+ *                                    if false each side is shuffled independently.
+ * @returns {{p0:{back:string[],pawns:string[]}, p1:{back:string[],pawns:string[]}}}
+ */
+export function randomChessSetup({ randomPawns = false, mirror = true } = {}) {
+  const makeSide = () => {
+    if (randomPawns) {
+      const all = shuffle([...BACK_RANK, 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p']);
+      return { back: all.slice(0, 8), pawns: all.slice(8, 16) };
+    }
+    return { back: shuffle(BACK_RANK), pawns: ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'] };
+  };
+  const p0 = makeSide();
+  const p1 = mirror
+    ? { back: [...p0.back], pawns: [...p0.pawns] }
+    : makeSide();
+  return { p0, p1 };
 }
 
 export { PIECE_VALUE };

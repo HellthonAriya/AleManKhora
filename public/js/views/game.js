@@ -419,7 +419,7 @@ export function GameView(roomId) {
     numPlayers = v.numPlayers || v.players?.length || 2;
     aiSeats = v.aiSeats || []; status = v.status; code = v.code;
     gameType = v.gameType || config?.gameType || 'quoridor';
-    isChess = gameType === 'chess' || gameType === 'chess4';
+    isChess = gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade';
     if (v.clock) setClock(v.clock);
     syncRenderer();
   }

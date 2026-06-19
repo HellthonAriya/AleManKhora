@@ -7,7 +7,7 @@
  */
 import { customAlphabet } from 'nanoid';
 import { QuoridorGame } from './engine.js';
-import { ChessGame } from './chess.js';
+import { ChessGame, randomChessSetup } from './chess.js';
 import { TicTacToeGame } from './tictactoe.js';
 import { GomokuGame } from './gomoku.js';
 import { OthelloGame } from './othello.js';
@@ -23,7 +23,7 @@ import { chooseBackgammonAction } from './backgammonAI.js';
 import { Games, applyEloResult, applyEloDraw } from '../models.js';
 import db, { getSettings } from '../db.js';
 
-const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
+const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 // The simple 2-player board games that share one lightweight customizer/config.
 const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 
@@ -32,6 +32,7 @@ function buildEngine(gameType, config) {
   switch (gameType) {
     case 'chess': return new ChessGame({ variant: '2' });
     case 'chess4': return new ChessGame({ variant: config.teams ? '4team' : '4' });
+    case 'chesszade': return new ChessGame({ variant: '2', setup: randomChessSetup({ randomPawns: config.randomPawns, mirror: config.mirror }) });
     case 'tictactoe': return new TicTacToeGame();
     case 'gomoku': return new GomokuGame({ size: config.size || 15 });
     case 'othello': return new OthelloGame();
@@ -115,12 +116,15 @@ function sanitizeChessConfig(cfg, gameType) {
     p0Color: colors[0], p1Color: colors[1],
     timeLimit, timeIncrement,
     ranked: gameType === 'chess' ? !!cfg.ranked : false,
+    // شطرنج زاده‌ای options (ignored by other chess types)
+    randomPawns: gameType === 'chesszade' ? !!cfg.randomPawns : false,
+    mirror: gameType === 'chesszade' ? (cfg.mirror !== false) : false,
   };
 }
 
 function sanitizeConfig(cfg = {}) {
   const gameType = GAME_TYPES.includes(cfg.gameType) ? cfg.gameType : 'quoridor';
-  if (gameType === 'chess' || gameType === 'chess4') return sanitizeChessConfig(cfg, gameType);
+  if (gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade') return sanitizeChessConfig(cfg, gameType);
   if (SIMPLE_TYPES.includes(gameType)) return sanitizeSimpleConfig(cfg, gameType);
 
   const s = getSettings();
@@ -408,7 +412,7 @@ export class GameManager {
   /** Dispatch to the right AI for this room's game type. */
   pickAIAction(room, seat) {
     switch (room.gameType) {
-      case 'chess': case 'chess4': return chooseChessAction(room.game, seat, room.aiDifficulty);
+      case 'chess': case 'chess4': case 'chesszade': return chooseChessAction(room.game, seat, room.aiDifficulty);
       case 'tictactoe': return chooseTicTacToeAction(room.game, seat, room.aiDifficulty);
       case 'gomoku': return chooseGomokuAction(room.game, seat, room.aiDifficulty);
       case 'othello': return chooseOthelloAction(room.game, seat, room.aiDifficulty);
