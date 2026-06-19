@@ -223,11 +223,13 @@ export function GameView(roomId) {
     }
     const inChk = isChess && state.inCheck?.[state.turn];
     const turnName = players[state.turn]?.name || `بازیکن ${SEAT_LABELS[state.turn]}`;
+    // Note: native Element.append() turns a null argument into the text "null",
+    // so only append the check badge when it actually applies.
     turnBanner.append(
       h('span', { class: 'dot', style: `color:${seatColor(state.turn)}` }),
       myTurn ? '✦ نوبت توست' : `نوبت ${turnName}`,
-      inChk ? h('span', { class: 'check-badge' }, ' کیش!') : null,
     );
+    if (inChk) turnBanner.append(h('span', { class: 'check-badge' }, ' کیش!'));
   }
 
   function chessMaterial(s) {
