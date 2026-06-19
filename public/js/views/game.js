@@ -7,6 +7,7 @@ import { GridRenderer } from '../gridboard.js';
 import { DotsRenderer } from '../dotsboard.js';
 import { BackgammonRenderer } from '../backgammonboard.js';
 import { HokmRenderer } from '../hokmboard.js';
+import { PasurRenderer } from '../pasurboard.js';
 import { openRules } from '../rules.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
@@ -66,6 +67,8 @@ export function GameView(roomId) {
       renderer = new BackgammonRenderer(canvas, { onAction: act });
     } else if (gameType === 'hokm') {
       renderer = new HokmRenderer(canvas, { onAction: act });
+    } else if (gameType === 'pasur') {
+      renderer = new PasurRenderer(canvas, { onAction: act });
     } else {
       // دوز / گوموکو / اوتلو — shared grid renderer (dispatches on state.gameType)
       renderer = new GridRenderer(canvas, { onAction: act });
@@ -283,6 +286,15 @@ export function GameView(roomId) {
           h('div', { class: 'pc-walls' }, `🃏 ${faNum(tricks)} دست` + (isHakem ? ' · حاکم' : '')),
           state.teams ? h('span', { class: 'faint' }, s % 2 === 0 ? 'تیم ۱' : 'تیم ۲') : null);
       }
+      case 'pasur': {
+        const cards = state.capturedCounts?.[s] ?? 0;
+        const clubs = state.clubCounts?.[s] ?? 0;
+        const surs = state.surs?.[s] ?? 0;
+        const pts = state.scores?.[s];
+        return h('div', {},
+          h('div', { class: 'pc-walls' }, `🃏 ${faNum(cards)} برگ · ♣ ${faNum(clubs)} · سور ${faNum(surs)}`),
+          pts != null ? h('span', { class: 'faint' }, `${faNum(pts)} امتیاز`) : null);
+      }
       default: return h('div', {});
     }
   }
@@ -298,6 +310,7 @@ export function GameView(roomId) {
       case 'dots': return 'روی خط بین دو نقطه بزن. هر مربعی که کامل کنی مال توست و دوباره نوبت توست.';
       case 'backgammon': return 'اول روی مهرهٔ خودت بزن، بعد روی خانهٔ مقصدِ نشان‌دار. تاس‌ها خودکار ریخته می‌شوند.';
       case 'hokm': return 'اگر حاکمی، اول حکم (خال برنده) را انتخاب کن. بعد به نوبت، یک ورق بازی کن؛ اگر خالِ زمین را داری باید همان را بازی کنی.';
+      case 'pasur': return 'یک کارت از دستت را بزن تا انتخاب شود. با کارت عددی، برگ‌هایی از میز را بردار که مجموعشان با کارتت ۱۱ شود. سرباز همهٔ میز را جمع می‌کند.';
       default: return '';
     }
   }
@@ -501,11 +514,21 @@ export function GameView(roomId) {
       const me = [data.elo.winner, data.elo.loser].find((x) => x.id === store.me?.id);
       if (me) { const diff = me.after - me.before; eloLine = `امتیاز ELO: ${faNum(me.before)} → ${faNum(me.after)} (${diff >= 0 ? '+' : ''}${faNum(diff)})`; }
     }
+    // Pasur final-score line.
+    let scoreLine = '';
+    if (gameType === 'pasur' && Array.isArray(data.state?.scores) && !spectator && seat >= 0) {
+      const mine = data.state.scores[seat] ?? 0;
+      const theirs = data.state.scores[1 - seat] ?? 0;
+      scoreLine = `امتیاز تو ${faNum(mine)} — حریف ${faNum(theirs)}`;
+    } else if (gameType === 'pasur' && Array.isArray(data.state?.scores)) {
+      scoreLine = `امتیاز: ${faNum(data.state.scores[0] ?? 0)} — ${faNum(data.state.scores[1] ?? 0)}`;
+    }
     const canRematch = !spectator && (aiSeats.length > 0 || players.filter((p) => p && !p.isAI).length >= 1);
     overModalHandle = modal({
       title,
       body: h('div', { class: 'center' },
         h('p', { style: 'font-size:1.1rem;margin-bottom:6px' }, headline),
+        scoreLine ? h('p', { style: 'font-weight:700;color:var(--accent)' }, scoreLine) : null,
         eloLine ? h('p', { class: 'muted' }, eloLine) : null),
       actions: [
         { label: 'بازگشت به سالن', class: 'btn-ghost', onClick: () => navigate('/lobby') },

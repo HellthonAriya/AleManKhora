@@ -10,6 +10,7 @@ const GAMES = [
   { id: 'chess4', icon: '♞', name: 'شطرنج ۴ نفره', desc: 'تخته صلیبی، ۴ ارتش' },
   { id: 'chesszade', icon: '🔀', name: 'شطرنج زاده‌ای', desc: 'چیدمان تصادفی، نبرد نو' },
   { id: 'hokm', icon: '🃏', name: 'حکم', desc: 'ورق ایرانی — ۲، ۳ یا ۴ نفره' },
+  { id: 'pasur', icon: '🎴', name: 'پاسور (چهاربرگ)', desc: 'برگ‌ها را جمع کن — مجموع ۱۱' },
   { id: 'backgammon', icon: '🎲', name: 'تخته‌نرد', desc: 'تاس بریز، مهره‌ها را خارج کن' },
   { id: 'othello', icon: '⚫', name: 'اوتلو', desc: 'مهره‌ها را برگردان، اکثریت بگیر' },
   { id: 'gomoku', icon: '⬤', name: 'گوموکو', desc: 'پنج مهره در یک خط' },

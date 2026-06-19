@@ -14,6 +14,7 @@ import { OthelloGame } from './othello.js';
 import { DotsGame } from './dots.js';
 import { BackgammonGame } from './backgammon.js';
 import { HokmGame } from './hokm.js';
+import { PasurGame } from './pasur.js';
 import { chooseAction } from './ai.js';
 import { chooseChessAction } from './chessAI.js';
 import { chooseTicTacToeAction } from './tictactoeAI.js';
@@ -22,10 +23,11 @@ import { chooseOthelloAction } from './othelloAI.js';
 import { chooseDotsAction } from './dotsAI.js';
 import { chooseBackgammonAction } from './backgammonAI.js';
 import { chooseHokmAction } from './hokmAI.js';
+import { choosePasurAction } from './pasurAI.js';
 import { Games, applyEloResult, applyEloDraw } from '../models.js';
 import db, { getSettings } from '../db.js';
 
-const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'hokm'];
+const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'hokm', 'pasur'];
 // The simple 2-player board games that share one lightweight customizer/config.
 const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 
@@ -41,6 +43,7 @@ function buildEngine(gameType, config) {
     case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5 });
     case 'backgammon': return new BackgammonGame();
     case 'hokm': return new HokmGame({ variant: config.variant });
+    case 'pasur': return new PasurGame();
     default: return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
   }
 }
@@ -142,10 +145,25 @@ function sanitizeHokmConfig(cfg) {
   };
 }
 
+const PASUR_DEFAULT_COLORS = ['#e7503a', '#3d7fe0'];
+function sanitizePasurConfig(cfg) {
+  const colorRe = /^#[0-9a-fA-F]{6}$/;
+  const incoming = Array.isArray(cfg.colors) ? cfg.colors : [cfg.p0Color, cfg.p1Color];
+  const colors = [0, 1].map((i) => (colorRe.test(incoming?.[i]) ? incoming[i] : PASUR_DEFAULT_COLORS[i]));
+  const timeLimit = TIME_LIMITS.includes(parseInt(cfg.timeLimit, 10)) ? parseInt(cfg.timeLimit, 10) : 0;
+  const timeIncrement = TIME_INCREMENTS.includes(parseInt(cfg.timeIncrement, 10)) ? parseInt(cfg.timeIncrement, 10) : 0;
+  return {
+    gameType: 'pasur', players: 2, teams: false, colors,
+    p0Color: colors[0], p1Color: colors[1],
+    timeLimit, timeIncrement, ranked: false,
+  };
+}
+
 function sanitizeConfig(cfg = {}) {
   const gameType = GAME_TYPES.includes(cfg.gameType) ? cfg.gameType : 'quoridor';
   if (gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade') return sanitizeChessConfig(cfg, gameType);
   if (gameType === 'hokm') return sanitizeHokmConfig(cfg);
+  if (gameType === 'pasur') return sanitizePasurConfig(cfg);
   if (SIMPLE_TYPES.includes(gameType)) return sanitizeSimpleConfig(cfg, gameType);
 
   const s = getSettings();
@@ -447,6 +465,7 @@ export class GameManager {
       case 'dots': return chooseDotsAction(room.game, seat, room.aiDifficulty);
       case 'backgammon': return chooseBackgammonAction(room.game, seat, room.aiDifficulty);
       case 'hokm': return chooseHokmAction(room.game, seat, room.aiDifficulty);
+      case 'pasur': return choosePasurAction(room.game, seat, room.aiDifficulty);
       default: return chooseAction(room.game, seat, room.aiDifficulty);
     }
   }
@@ -523,6 +542,7 @@ export class GameManager {
       }
       return 950 + Math.random() * 350; // mid-trick: relaxed, one card at a time
     }
+    if (g.gameType === 'pasur') return 850 + Math.random() * 450; // unhurried card play
     return 550 + Math.random() * 500;
   }
 

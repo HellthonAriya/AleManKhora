@@ -8,16 +8,18 @@ import { GridRenderer } from './gridboard.js';
 import { DotsRenderer } from './dotsboard.js';
 import { BackgammonRenderer } from './backgammonboard.js';
 import { HokmRenderer } from './hokmboard.js';
+import { PasurRenderer } from './pasurboard.js';
 import { TicTacToeGame } from './tictactoe.js';
 import { GomokuGame } from './gomoku.js';
 import { OthelloGame } from './othello.js';
 import { DotsGame } from './dots.js';
 import { BackgammonGame } from './backgammon.js';
 import { HokmGame } from './hokm.js';
+import { PasurGame } from './pasur.js';
 
 const CHESS_SWATCHES = ['#f3f1ea', '#2b2b30', '#e7503a', '#3d7fe0', '#e8b730', '#3bb15f', '#9b8cff', '#36c6ff'];
 const SIMPLE_SWATCHES = ['#1b1d22', '#f1ece0', '#efe9dc', '#36c6ff', '#ff6b6b', '#ffd36b', '#3bb15f', '#9b8cff', '#e7503a'];
-const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
+const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'pasur'];
 
 /** Pick the right customizer for a game type. Returns { element, getConfig }. */
 export function makeCustomizer(gameType, opts = {}) {
@@ -397,9 +399,10 @@ const SIMPLE_DEFAULT_COLORS = {
   othello: ['#1b1d22', '#f1ece0'],
   dots: ['#36c6ff', '#ff6b6b'],
   backgammon: ['#efe9dc', '#21242b'],
+  pasur: ['#e7503a', '#3d7fe0'],
 };
 const SIMPLE_NAMES = {
-  tictactoe: 'دوز', gomoku: 'گوموکو', othello: 'اوتلو', dots: 'نقطه‌خط', backgammon: 'تخته‌نرد',
+  tictactoe: 'دوز', gomoku: 'گوموکو', othello: 'اوتلو', dots: 'نقطه‌خط', backgammon: 'تخته‌نرد', pasur: 'پاسور',
 };
 
 /**
@@ -423,15 +426,17 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     if (gameType === 'othello') return new OthelloGame();
     if (gameType === 'tictactoe') return new TicTacToeGame();
     if (gameType === 'dots') return new DotsGame({ rows: cfg.size, cols: cfg.size });
+    if (gameType === 'pasur') return new PasurGame();
     return new BackgammonGame();
   }
   function buildRenderer() {
     if (gameType === 'dots') return new DotsRenderer(previewCanvas);
     if (gameType === 'backgammon') return new BackgammonRenderer(previewCanvas);
+    if (gameType === 'pasur') return new PasurRenderer(previewCanvas);
     return new GridRenderer(previewCanvas);
   }
   function seed(g) {
-    const n = gameType === 'gomoku' ? 5 : gameType === 'othello' ? 6 : gameType === 'dots' ? 7 : gameType === 'tictactoe' ? 3 : 0;
+    const n = gameType === 'gomoku' ? 5 : gameType === 'othello' ? 6 : gameType === 'dots' ? 7 : gameType === 'tictactoe' ? 3 : gameType === 'pasur' ? 4 : 0;
     for (let i = 0; i < n; i++) {
       const moves = g.legalMoves(g.turn);
       if (!moves.length || g.isOver()) break;

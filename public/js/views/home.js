@@ -15,6 +15,9 @@ import { BackgammonGame } from '../backgammon.js';
 import { HokmRenderer } from '../hokmboard.js';
 import { HokmGame } from '../hokm.js';
 import { chooseHokmAction } from '../hokmAI.js';
+import { PasurRenderer } from '../pasurboard.js';
+import { PasurGame } from '../pasur.js';
+import { choosePasurAction } from '../pasurAI.js';
 
 const SIMPLE_COLORS = {
   tictactoe: ['#36c6ff', '#ff6b6b'],
@@ -39,6 +42,7 @@ export function HomeView() {
   const dotsPrev = h('canvas', { class: 'game-prev-canvas' });
   const tttPrev = h('canvas', { class: 'game-prev-canvas' });
   const hokmPrev = h('canvas', { class: 'game-prev-canvas' });
+  const pasurPrev = h('canvas', { class: 'game-prev-canvas' });
 
   const view = h('div', { class: 'fade-in' },
     h('section', { class: 'hero' },
@@ -66,6 +70,7 @@ export function HomeView() {
         gameCard(gomokuPrev, '⬤', 'گوموکو', 'پنج مهره پشت‌سرهم در یک خط بچین تا ببری.'),
         gameCard(dotsPrev, '▦', 'نقطه‌خط', 'خط بکش و مربع ببند؛ هر مربع که بستی دوباره نوبت توست.'),
         gameCard(hokmPrev, '🃏', 'حکم', 'بازی ورق ایرانی — حُکم را انتخاب کن و دست ببر. ۲ تا ۴ نفره.'),
+        gameCard(pasurPrev, '🎴', 'پاسور (چهاربرگ)', 'ورق‌های میز را با جمعِ ۱۱ شکار کن و امتیاز جمع کن. ۲ نفره.'),
         gameCard(tttPrev, '✕', 'دوز', 'سه علامت در یک خط — سادهٔ سریع و دوست‌داشتنی.'),
       ),
     ),
@@ -91,6 +96,7 @@ export function HomeView() {
     animateSimplePreview(dotsPrev, 'dots');
     animateSimplePreview(tttPrev, 'tictactoe');
     animateHokmPreview(hokmPrev);
+    animatePasurPreview(pasurPrev);
   });
   return view;
 }
@@ -343,6 +349,31 @@ function animateHokmPreview(canvas) {
       r.setState(g.toStateFor(0));
     } catch {}
     setTimeout(step, 900);
+  };
+  setTimeout(step, 900);
+}
+
+/* ---------- پاسور animated preview ---------- */
+
+function animatePasurPreview(canvas) {
+  const r = new PasurRenderer(canvas);
+  r.setConfig({ colors: ['#e7503a', '#3d7fe0'] });
+  r.setMySeat(0);
+  let g, moves = 0;
+  const newGame = () => { g = new PasurGame(); moves = 0; r.setState(g.toStateFor(0)); };
+  newGame();
+  const restart = () => { if (isGone(canvas)) return; newGame(); setTimeout(step, 900); };
+  const step = () => {
+    if (isGone(canvas)) return;
+    try {
+      if (g.isOver() || moves >= 40) { setTimeout(restart, 1800); return; }
+      const a = choosePasurAction(g, g.turn, 'normal');
+      if (!a) { setTimeout(restart, 1800); return; }
+      g.apply(g.turn, a);
+      moves++;
+      r.setState(g.toStateFor(0));
+    } catch {}
+    setTimeout(step, 1000);
   };
   setTimeout(step, 900);
 }
