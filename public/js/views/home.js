@@ -10,9 +10,6 @@ export function HomeView() {
     ? h('a', { class: 'btn btn-primary btn-lg', href: '#/lobby', 'data-link': true }, '🎮 شروع بازی')
     : h('a', { class: 'btn btn-primary btn-lg', href: '#/play', 'data-link': true }, '🎮 همین حالا بازی کن');
 
-  const canvas = h('canvas', { id: 'demo-board' });
-
-  // mini static previews for the games showcase
   const chessPrev = h('canvas', { class: 'game-prev-canvas' });
   const chess4Prev = h('canvas', { class: 'game-prev-canvas' });
   const quoridorPrev = h('canvas', { class: 'game-prev-canvas' });
@@ -29,7 +26,6 @@ export function HomeView() {
           h('a', { class: 'btn btn-ghost btn-lg', href: '#/leaderboard', 'data-link': true }, '🏆 جدول رتبه‌بندی'),
         ),
       ),
-      h('div', { class: 'hero-art' }, canvas),
     ),
 
     h('section', {},
@@ -52,10 +48,9 @@ export function HomeView() {
   );
 
   requestAnimationFrame(() => {
-    startDemo(canvas, view);
-    drawChessPreview(chessPrev, '2');
-    drawChessPreview(chess4Prev, '4');
-    drawQuoridorPreview(quoridorPrev);
+    animateQuoridorPreview(quoridorPrev);
+    animateChessPreview(chessPrev, '2');
+    animateChessPreview(chess4Prev, '4');
   });
   return view;
 }
@@ -72,49 +67,32 @@ function feature(ico, title, text) {
   return h('div', { class: 'feature' }, h('div', { class: 'ico' }, ico), h('h3', {}, title), h('p', {}, text));
 }
 
-function drawChessPreview(canvas, variant) {
-  const r = new ChessBoardRenderer(canvas);
-  r.setConfig({ boardTheme: variant === '4' ? 'midnight' : 'green',
-    colors: variant === '4' ? ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'] : ['#f3f1ea', '#2b2b30'] });
-  const g = new ChessGame({ variant });
-  // play a couple of opening moves for visual interest
-  try {
-    if (variant === '2') {
-      g.apply(0, { type: 'move', from: { r: 6, c: 4 }, to: { r: 4, c: 4 } });
-      g.apply(1, { type: 'move', from: { r: 1, c: 2 }, to: { r: 3, c: 2 } });
-    }
-  } catch { /* ignore */ }
-  r.setState(g.toState(), { animate: false });
-}
-
-function drawQuoridorPreview(canvas) {
-  const r = new BoardRenderer(canvas);
-  r.setConfig({ theme: 'emerald', p0Color: '#36c6ff', p1Color: '#ffd36b' });
-  const g = new QuoridorGame({ size: 9, wallsEach: 10 });
-  try { g.apply(0, { type: 'wall', r: 4, c: 3, o: 'h' }); g.apply(1, { type: 'wall', r: 2, c: 5, o: 'v' }); g.turn = 0; } catch { /* ignore */ }
-  r.setState(g.toState(), { animate: false });
-}
-
-function startDemo(canvas, view) {
-  const r = new BoardRenderer(canvas);
-  r.setConfig({ theme: 'emerald', p0Color: '#36c6ff', p1Color: '#ffd36b' });
-  const g = new QuoridorGame({ size: 7, wallsEach: 6 });
-  r.setState(g.toState(), { animate: false });
-
+function watchCanvas(canvas) {
   let stopped = false;
   const obs = new MutationObserver(() => {
     if (!document.body.contains(canvas)) { stopped = true; obs.disconnect(); }
   });
   obs.observe(document.body, { childList: true, subtree: true });
+  return { get stopped() { return stopped; } };
+}
+
+/* ---------- Quoridor animated preview ---------- */
+
+function animateQuoridorPreview(canvas) {
+  const r = new BoardRenderer(canvas);
+  r.setConfig({ theme: 'emerald', p0Color: '#36c6ff', p1Color: '#ffd36b' });
+  const sentinel = watchCanvas(canvas);
+
+  const newGame = () => new QuoridorGame({ size: 7, wallsEach: 6 });
+  let g = newGame();
+  r.setState(g.toState(), { animate: false });
 
   const step = () => {
-    if (stopped) return;
+    if (sentinel.stopped) return;
     if (g.winner !== null) {
       setTimeout(() => {
-        if (stopped) return;
-        const ng = new QuoridorGame({ size: 7, wallsEach: 6 });
-        Object.assign(g, ng);
-        g.walls = ng.walls;
+        if (sentinel.stopped) return;
+        g = newGame();
         r.setState(g.toState(), { animate: false });
         setTimeout(step, 700);
       }, 1400);
@@ -122,9 +100,11 @@ function startDemo(canvas, view) {
     }
     const me = g.turn;
     let acted = false;
-    if (g.wallsLeft[me] > 0 && Math.random() < 0.25) {
+    if (g.wallsLeft[me] > 0 && Math.random() < 0.28) {
       const walls = g.allWallPlacements(me);
-      if (walls.length) { try { g.apply(me, walls[Math.floor(Math.random() * walls.length)]); acted = true; } catch {} }
+      if (walls.length) {
+        try { g.apply(me, walls[Math.floor(Math.random() * walls.length)]); acted = true; } catch {}
+      }
     }
     if (!acted) {
       const moves = g.legalMoves(me);
@@ -133,7 +113,86 @@ function startDemo(canvas, view) {
       try { g.apply(me, { type: 'move', ...moves[0] }); } catch {}
     }
     r.setState(g.toState());
-    setTimeout(step, 900);
+    setTimeout(step, 950);
   };
   setTimeout(step, 800);
+}
+
+/* ---------- Chess animated preview ---------- */
+
+const CHESS_OPENINGS_2P = [
+  // e4 e5 Nf3 Nc6 Bc4 (Italian)
+  [
+    [0, { type: 'move', from: { r: 6, c: 4 }, to: { r: 4, c: 4 } }],
+    [1, { type: 'move', from: { r: 1, c: 4 }, to: { r: 3, c: 4 } }],
+    [0, { type: 'move', from: { r: 7, c: 6 }, to: { r: 5, c: 5 } }],
+    [1, { type: 'move', from: { r: 0, c: 1 }, to: { r: 2, c: 2 } }],
+    [0, { type: 'move', from: { r: 7, c: 5 }, to: { r: 4, c: 2 } }],
+    [1, { type: 'move', from: { r: 1, c: 2 }, to: { r: 3, c: 2 } }],
+  ],
+  // d4 d5 c4 e6 (Queen's Gambit)
+  [
+    [0, { type: 'move', from: { r: 6, c: 3 }, to: { r: 4, c: 3 } }],
+    [1, { type: 'move', from: { r: 1, c: 3 }, to: { r: 3, c: 3 } }],
+    [0, { type: 'move', from: { r: 6, c: 2 }, to: { r: 4, c: 2 } }],
+    [1, { type: 'move', from: { r: 1, c: 4 }, to: { r: 2, c: 4 } }],
+    [0, { type: 'move', from: { r: 7, c: 6 }, to: { r: 5, c: 5 } }],
+    [1, { type: 'move', from: { r: 0, c: 6 }, to: { r: 2, c: 5 } }],
+  ],
+];
+
+function animateChessPreview(canvas, variant) {
+  const is4 = variant === '4' || variant === '4team';
+  const r = new ChessBoardRenderer(canvas);
+  r.setConfig({
+    boardTheme: is4 ? 'midnight' : 'green',
+    colors: is4
+      ? ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f']
+      : ['#f3f1ea', '#2b2b30'],
+  });
+  const sentinel = watchCanvas(canvas);
+
+  let g, openingIdx = 0, openingStep = 0;
+
+  const newGame = () => {
+    g = new ChessGame({ variant });
+    openingIdx = Math.floor(Math.random() * CHESS_OPENINGS_2P.length);
+    openingStep = 0;
+    r.setState(g.toState(), { animate: false });
+  };
+  newGame();
+
+  const randomMove = (seat) => {
+    const moves = g.legalMoves(seat);
+    if (!moves.length) return;
+    // prefer captures for visual excitement
+    const caps = moves.filter((m) => g.board[m.to.r]?.[m.to.c] || m.ep || m.promo);
+    const pick = caps.length && Math.random() < 0.6
+      ? caps[Math.floor(Math.random() * caps.length)]
+      : moves[Math.floor(Math.random() * moves.length)];
+    const action = { type: 'move', from: pick.from, to: pick.to, promo: pick.promo ?? (pick.to.r === 0 || pick.to.r === 7 ? 'q' : undefined) };
+    try { g.apply(seat, action); } catch {}
+  };
+
+  const step = () => {
+    if (sentinel.stopped) return;
+    if (g.gameOver) {
+      setTimeout(() => { if (!sentinel.stopped) { newGame(); setTimeout(step, 600); } }, 1600);
+      return;
+    }
+    const seat = g.turn;
+    if (!is4 && openingStep < CHESS_OPENINGS_2P[openingIdx].length) {
+      const [s, action] = CHESS_OPENINGS_2P[openingIdx][openingStep];
+      if (s === seat) {
+        try { g.apply(seat, action); openingStep++; } catch { openingStep++; randomMove(seat); }
+      } else {
+        randomMove(seat);
+      }
+    } else {
+      randomMove(seat);
+    }
+    r.setState(g.toState());
+    setTimeout(step, is4 ? 750 : 900);
+  };
+  setTimeout(step, 900);
 }
