@@ -505,7 +505,25 @@ export class GameManager {
         const action = this.pickAIAction(room, seat);
         if (action) this.applyAction(room, seat, action);
       } catch { /* ignore AI errors */ }
-    }, 550 + Math.random() * 500);
+    }, this.aiThinkDelay(room));
+  }
+
+  /** How long the AI should "think" before acting — paced so client-side
+   *  animations (especially Hokm's card flights and trick-hold) finish first
+   *  and moves don't fire rapid-fire on top of each other. */
+  aiThinkDelay(room) {
+    const g = room.game;
+    if (g.gameType === 'hokm' && g.phase === 'play') {
+      // Leader about to start a brand-new trick.
+      if (g.trick.length === 0) {
+        // After at least one completed trick, wait for the client to finish
+        // displaying the previous trick (~2.4s hold) before dealing the next.
+        if (g.trickNumber > 0) return 2700;
+        return 1500; // first lead right after the trump burst settles
+      }
+      return 950 + Math.random() * 350; // mid-trick: relaxed, one card at a time
+    }
+    return 550 + Math.random() * 500;
   }
 
   finishGame(room, winnerSeat) {

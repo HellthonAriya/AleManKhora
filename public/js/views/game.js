@@ -29,6 +29,8 @@ export function GameView(roomId) {
   let code = null;
   let gameType = 'quoridor';
   let isChess = false;
+  let rematchPending = false; // true after we vote for a rematch, until it starts
+  let overModalHandle = null; // handle to the open game-over popup, if any
 
   // local clock model
   let clock = { enabled: false, remaining: [], turn: 0, running: false, incMs: 0, limitMs: 0 };
@@ -228,6 +230,10 @@ export function GameView(roomId) {
 
   function updateBanner(myTurn) {
     clear(turnBanner);
+    if (rematchPending && status === 'finished') {
+      turnBanner.append(h('span', { class: 'spinner spinner-sm' }), ' 🔄 در انتظار شروع بازی مجدد…');
+      return;
+    }
     if (status === 'waiting') { turnBanner.append('⏳ در انتظار حریف…'); return; }
     if (gameIsOver()) {
       if (state.draw) { turnBanner.append('🤝 بازی مساوی شد'); return; }
@@ -442,7 +448,7 @@ export function GameView(roomId) {
   }
 
   const handlers = {
-    'game:start': (v) => { applyView(v); toast('بازی شروع شد! موفق باشی', 'success'); },
+    'game:start': (v) => { rematchPending = false; if (overModalHandle) { overModalHandle.close(); overModalHandle = null; } applyView(v); toast('بازی شروع شد! موفق باشی', 'success'); },
     'room:update': (v) => applyView(v),
     'game:update': ({ state: s }) => { state = s; syncRenderer(); },
     'game:clock': (cv) => { setClock(cv); },
@@ -478,6 +484,7 @@ export function GameView(roomId) {
   for (const [ev, fn] of Object.entries(handlers)) socket.on(ev, fn);
 
   function showGameOver(data) {
+    if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
     const iWon = data.winner === seat || (config?.teams && data.winner != null && data.winner % 2 === seat % 2);
     let title, headline;
     if (data.draw) { title = '🤝 مساوی'; headline = drawReasonText(data.reason); }
@@ -495,14 +502,14 @@ export function GameView(roomId) {
       if (me) { const diff = me.after - me.before; eloLine = `امتیاز ELO: ${faNum(me.before)} → ${faNum(me.after)} (${diff >= 0 ? '+' : ''}${faNum(diff)})`; }
     }
     const canRematch = !spectator && (aiSeats.length > 0 || players.filter((p) => p && !p.isAI).length >= 1);
-    modal({
+    overModalHandle = modal({
       title,
       body: h('div', { class: 'center' },
         h('p', { style: 'font-size:1.1rem;margin-bottom:6px' }, headline),
         eloLine ? h('p', { class: 'muted' }, eloLine) : null),
       actions: [
         { label: 'بازگشت به سالن', class: 'btn-ghost', onClick: () => navigate('/lobby') },
-        ...(canRematch ? [{ label: '🔄 بازی مجدد', class: 'btn-primary', onClick: () => { socket.emit('game:rematch'); return true; } }] : []),
+        ...(canRematch ? [{ label: '🔄 بازی مجدد', class: 'btn-primary', onClick: () => { socket.emit('game:rematch'); rematchPending = true; updateBanner(false); /* close popup, show waiting state */ } }] : []),
       ],
     });
   }

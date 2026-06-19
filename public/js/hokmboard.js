@@ -89,6 +89,12 @@ export class HokmRenderer {
     }
     this._shownTrickNo = Math.max(this._shownTrickNo, tn);
 
+    // A new trick's first card just hit the table → stop holding the old one,
+    // so the previous trick and the new card never show on top of each other.
+    if (prev && (prev.trick?.length ?? 0) === 0 && (state?.trick?.length ?? 0) >= 1) {
+      this.holdUntil = 0;
+    }
+
     // Queue card-flight animation for the newly played card
     if (prev && state) this._detectAndQueueFlight(prev, state);
 
@@ -253,12 +259,18 @@ export class HokmRenderer {
     const flyingSeats = new Set(this._flyingCards.map((f) => f.seat));
 
     ctx.save();
+    // Clear the whole canvas first WITHOUT the shake offset — otherwise the
+    // offset clear leaves trails of the previous frame.
+    ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+    ctx.clearRect(0, 0, S, S);
+    // Apply the brief trump shake to everything drawn below.
     const [sx, sy] = this._shakeOffset();
-    ctx.setTransform(this._dpr, 0, 0, this._dpr, sx * this._dpr, sy * this._dpr);
-    ctx.clearRect(-sx, -sy, S + Math.abs(sx) * 2, S + Math.abs(sy) * 2);
+    if (sx || sy) ctx.setTransform(this._dpr, 0, 0, this._dpr, sx * this._dpr, sy * this._dpr);
 
-    // Table background
-    this._rr(0, 0, S, S, 16); ctx.fillStyle = FELT_EDGE; ctx.fill();
+    // Table background — overscan by OVER px so the shake never reveals the
+    // transparent page behind the felt at the edges.
+    const OVER = 18;
+    this._rr(-OVER, -OVER, S + OVER * 2, S + OVER * 2, 16); ctx.fillStyle = FELT_EDGE; ctx.fill();
     this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.47); ctx.fillStyle = FELT; ctx.fill();
 
     this.hand = []; this.trumpBtns = [];
