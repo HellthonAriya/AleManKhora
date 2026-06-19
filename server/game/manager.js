@@ -576,10 +576,13 @@ export class GameManager {
   enqueue(socket, identity, config) {
     this.dequeue(socket.id);
     const cfg = sanitizeConfig(config);
+    // Note: `ranked` is intentionally NOT part of compatibility. A logged-in
+    // user (ranked:true) and a guest (ranked:false) must still be able to match;
+    // ELO is only ever applied when BOTH players are rated (see finishGame).
     const compatible = (q) =>
       q.config.gameType === cfg.gameType && q.config.players === cfg.players &&
       q.config.size === cfg.size && q.config.walls === cfg.walls &&
-      !!q.config.teams === !!cfg.teams && q.config.ranked === cfg.ranked &&
+      !!q.config.teams === !!cfg.teams &&
       q.config.timeLimit === cfg.timeLimit && q.socketId !== socket.id;
 
     // Gather enough players (2 or 4) before creating a room.
@@ -588,7 +591,11 @@ export class GameManager {
       const group = waiting.slice(0, cfg.players - 1);
       const groupIds = new Set(group.map((g) => g.socketId));
       this.queue = this.queue.filter((q) => !groupIds.has(q.socketId));
-      const room = this.createRoom({ mode: 'random', config: cfg });
+      // A matched 2-player game on a rankable type is ranked; ELO is still only
+      // applied when both seats turn out to be rated accounts (see finishGame).
+      const rankableType = cfg.gameType === 'quoridor' || cfg.gameType === 'chess';
+      const roomCfg = { ...cfg, ranked: cfg.players === 2 && rankableType };
+      const room = this.createRoom({ mode: 'random', config: roomCfg });
       const allMembers = [...group.map((g) => ({ socketId: g.socketId, identity: g.identity })),
         { socketId: socket.id, identity }];
       let ok = true;

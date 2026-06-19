@@ -101,28 +101,51 @@ function NotFound() {
 function renderNav() {
   const nav = $('#topnav');
   clear(nav);
-  nav.append(link('#/leaderboard', '🏆 رتبه‌بندی'));
 
   if (store.me) {
-    nav.append(link('#/lobby', '🎮 سالن بازی'));
-    if (store.isAdmin) nav.append(link('#/admin', '🛡 مدیریت'));
-    // user chip
+    // ---- Primary navigation links (single row) ----
+    const links = h('div', { class: 'nav-links' },
+      link('#/lobby', '🎮', 'سالن بازی'),
+      link('#/leaderboard', '🏆', 'رتبه‌بندی'),
+    );
+    if (store.isAdmin) links.append(link('#/admin', '🛡', 'مدیریت'));
+    nav.append(links);
+
+    // ---- User menu (avatar chip + dropdown) ----
     const name = store.displayName;
     const color = store.me.avatarColor || '#13c08a';
-    const chip = h('div', { class: 'nav-chip' },
-      h('span', {}, store.me.isGuest ? `${name} (مهمان)` : name),
-      h('span', { class: 'nav-avatar', style: `background:${color}` }, initials(name)));
-    chip.style.cursor = 'pointer';
-    chip.addEventListener('click', () => navigate('/profile'));
-    nav.append(chip);
-    nav.append(h('button', { onclick: logout }, 'خروج'));
+    const isGuest = store.me.isGuest;
+
+    const menu = h('div', { class: 'nav-menu' },
+      h('a', { class: 'nav-menu-item', href: '#/profile', 'data-link': true }, '👤 نمایه من'),
+      isGuest ? h('a', { class: 'nav-menu-item', href: '#/register', 'data-link': true }, '✨ ساخت حساب') : null,
+      h('div', { class: 'nav-menu-sep' }),
+      h('button', { class: 'nav-menu-item danger', onclick: (e) => { e.stopPropagation(); logout(); } }, '🚪 خروج'),
+    );
+
+    const chip = h('div', { class: 'nav-chip', tabindex: '0' },
+      h('span', { class: 'nav-avatar', style: `background:${color}` }, initials(name)),
+      h('span', { class: 'nav-chip-name' }, name),
+      isGuest ? h('span', { class: 'nav-chip-tag' }, 'مهمان') : null,
+      h('span', { class: 'nav-chip-caret' }, '▾'),
+    );
+
+    const userBox = h('div', { class: 'nav-user' }, chip, menu);
+    const toggle = (e) => { e.stopPropagation(); userBox.classList.toggle('open'); };
+    chip.addEventListener('click', toggle);
+    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); } });
+    document.addEventListener('click', () => userBox.classList.remove('open'));
+    nav.append(userBox);
   } else {
-    nav.append(link('#/play', 'ورود'));
+    nav.append(h('div', { class: 'nav-links' }, link('#/leaderboard', '🏆', 'رتبه‌بندی')));
+    nav.append(h('a', { class: 'btn btn-ghost btn-sm', href: '#/play', 'data-link': true }, 'ورود'));
     nav.append(h('a', { class: 'btn btn-primary btn-sm', href: '#/register', 'data-link': true }, 'ثبت‌نام'));
   }
 }
-function link(href, label) {
-  return h('a', { href, 'data-link': true }, label);
+function link(href, icon, label) {
+  return h('a', { href, 'data-link': true, class: 'nav-link' },
+    h('span', { class: 'nav-link-ico' }, icon),
+    h('span', { class: 'nav-link-text' }, label));
 }
 function updateActiveNav(path) {
   $$('#topnav a').forEach((a) => {

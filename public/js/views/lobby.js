@@ -107,15 +107,14 @@ export function LobbyView() {
       gameSelect),
     h('div', { class: 'lobby-grid', style: 'margin-top:26px' },
       h('div', { class: 'mode-list' },
-        modeCard('🎲', 'بازی تصادفی', 'با یک حریف هم‌سطح به‌صورت آنی همگام شو.', () => openRandom()),
         modeCard('🤝', 'دعوت دوست', 'یک اتاق خصوصی بساز و کد دعوت را بفرست.', () => openPrivate()),
         modeCard('🤖', 'بازی با هوش مصنوعی', 'با سه سطح سختی تمرین کن.', () => openAI()),
         modeCard('🔑', 'ورود با کد', 'به اتاق دوستت با کد دعوت بپیوند.', () => openJoin()),
       ),
       h('div', { class: 'card' },
-        h('div', { class: 'card-title' }, '⚡ بازی سریع'),
-        h('p', { class: 'card-sub' }, 'با تنظیمات پیش‌فرض و یک حریف تصادفی فوراً شروع کن.'),
-        h('button', { class: 'btn btn-primary btn-block', onclick: () => quickMatch() }, 'پیدا کردن حریف'),
+        h('div', { class: 'card-title' }, '🔍 پیدا کردن حریف'),
+        h('p', { class: 'card-sub' }, 'تنظیمات بازی را انتخاب کن و بگذار سیستم یک حریف هم‌سطح برایت پیدا کند.'),
+        h('button', { class: 'btn btn-primary btn-block', onclick: () => openRandom() }, '🔍 جست‌وجوی حریف'),
         h('div', { class: 'divider' }, 'یا'),
         h('button', { class: 'btn btn-block', onclick: () => openAI() }, '🤖 بازی فوری با هوش مصنوعی'),
       ),
@@ -145,13 +144,6 @@ export function LobbyView() {
 
   function openRandom() {
     customizerModal('بازی تصادفی', 'جست‌وجوی حریف', (config) => startQueue(config));
-  }
-
-  function quickMatch() {
-    const base = gameType === 'quoridor'
-      ? { size: store.config?.defaultBoardSize || 9, walls: store.config?.defaultWalls || 10, theme: store.config?.defaultTheme || 'emerald', ranked: !!store.isLoggedIn }
-      : { ranked: gameType === 'chess' && !!store.isLoggedIn };
-    startQueue({ ...base, gameType });
   }
 
   function startQueue(config) {
