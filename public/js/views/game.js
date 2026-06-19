@@ -6,6 +6,7 @@ import { ChessBoardRenderer } from '../chessboard.js';
 import { GridRenderer } from '../gridboard.js';
 import { DotsRenderer } from '../dotsboard.js';
 import { BackgammonRenderer } from '../backgammonboard.js';
+import { HokmRenderer } from '../hokmboard.js';
 import { openRules } from '../rules.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
@@ -61,6 +62,8 @@ export function GameView(roomId) {
       renderer = new DotsRenderer(canvas, { onAction: act });
     } else if (gameType === 'backgammon') {
       renderer = new BackgammonRenderer(canvas, { onAction: act });
+    } else if (gameType === 'hokm') {
+      renderer = new HokmRenderer(canvas, { onAction: act });
     } else {
       // دوز / گوموکو / اوتلو — shared grid renderer (dispatches on state.gameType)
       renderer = new GridRenderer(canvas, { onAction: act });
@@ -234,6 +237,12 @@ export function GameView(roomId) {
       turnBanner.append(h('span', { class: 'dot', style: `color:${seatColor(w)}` }), `🏆 ${wname} برنده شد`);
       return;
     }
+    if (gameType === 'hokm' && state.phase === 'choose-trump') {
+      const hk = players[state.hakem]?.name || `بازیکن ${SEAT_LABELS[state.hakem]}`;
+      turnBanner.append(h('span', { class: 'dot', style: `color:${seatColor(state.hakem)}` }),
+        state.hakem === seat ? '✦ حکم را انتخاب کن' : `${hk} در حال انتخاب حکم…`);
+      return;
+    }
     const inChk = isChess && state.inCheck?.[state.turn];
     const turnName = players[state.turn]?.name || `بازیکن ${SEAT_LABELS[state.turn]}`;
     // Note: native Element.append() turns a null argument into the text "null",
@@ -261,6 +270,13 @@ export function GameView(roomId) {
       case 'backgammon': return wrap(`✓ ${faNum(state.off?.[s] ?? 0)} از ۱۵`);
       case 'tictactoe': return wrap(s === 0 ? '✕' : '◯');
       case 'gomoku': return wrap(s === 0 ? '● سیاه' : '○ سفید');
+      case 'hokm': {
+        const tricks = state.tricksWon?.[s] ?? 0;
+        const isHakem = state.hakem === s;
+        return h('div', {},
+          h('div', { class: 'pc-walls' }, `🃏 ${faNum(tricks)} دست` + (isHakem ? ' · حاکم' : '')),
+          state.teams ? h('span', { class: 'faint' }, s % 2 === 0 ? 'تیم ۱' : 'تیم ۲') : null);
+      }
       default: return h('div', {});
     }
   }
@@ -275,6 +291,7 @@ export function GameView(roomId) {
       case 'othello': return 'روی خانه‌های نشان‌دار بزن تا مهرهٔ حریف را بین مهره‌هایت بگیری و برگردانی.';
       case 'dots': return 'روی خط بین دو نقطه بزن. هر مربعی که کامل کنی مال توست و دوباره نوبت توست.';
       case 'backgammon': return 'اول روی مهرهٔ خودت بزن، بعد روی خانهٔ مقصدِ نشان‌دار. تاس‌ها خودکار ریخته می‌شوند.';
+      case 'hokm': return 'اگر حاکمی، اول حکم (خال برنده) را انتخاب کن. بعد به نوبت، یک ورق بازی کن؛ اگر خالِ زمین را داری باید همان را بازی کنی.';
       default: return '';
     }
   }

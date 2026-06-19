@@ -42,7 +42,7 @@ export function registerSocket(io, manager) {
       try {
         const room = manager.createPrivate(config || {});
         const seat = manager.seatPlayer(room, socket, socket.data.identity, 0);
-        cb?.({ ok: true, roomId: room.id, code: room.code, seat, view: room.publicView() });
+        cb?.({ ok: true, roomId: room.id, code: room.code, seat, view: room.publicView(seat) });
       } catch (e) {
         cb?.({ ok: false, error: e.message });
       }
@@ -53,7 +53,7 @@ export function registerSocket(io, manager) {
         const room = manager.createAI(config || {}, difficulty);
         const seat = manager.seatPlayer(room, socket, socket.data.identity, 0);
         manager.maybeStart(room);
-        cb?.({ ok: true, roomId: room.id, seat, view: room.publicView() });
+        cb?.({ ok: true, roomId: room.id, seat, view: room.publicView(seat) });
       } catch (e) {
         cb?.({ ok: false, error: e.message });
       }
@@ -72,7 +72,7 @@ export function registerSocket(io, manager) {
         // re-seat — just return the existing seat.
         const mySeat = room.seatOf(socket.id);
         if (mySeat >= 0) {
-          return cb?.({ ok: true, roomId: room.id, seat: mySeat, view: room.publicView() });
+          return cb?.({ ok: true, roomId: room.id, seat: mySeat, view: room.publicView(mySeat) });
         }
         // Already watching this room.
         if (room.spectators.has(socket.id)) {
@@ -85,7 +85,7 @@ export function registerSocket(io, manager) {
           if (p && !p.isAI && !p.connected &&
               ((id.userId && p.userId === id.userId) || (id.guestId && p.guestId === id.guestId))) {
             manager.reconnect(room, socket, s);
-            return cb?.({ ok: true, roomId: room.id, seat: s, view: room.publicView(), reconnected: true });
+            return cb?.({ ok: true, roomId: room.id, seat: s, view: room.publicView(s), reconnected: true });
           }
         }
 
@@ -97,8 +97,8 @@ export function registerSocket(io, manager) {
         }
         const seat = manager.seatPlayer(room, socket, id);
         if (seat < 0) return cb?.({ ok: false, error: 'صندلی خالی نیست' });
-        cb?.({ ok: true, roomId: room.id, seat, view: room.publicView() });
-        manager.broadcast(room, 'room:update', room.publicView());
+        cb?.({ ok: true, roomId: room.id, seat, view: room.publicView(seat) });
+        manager.emitPerSeat(room, 'room:update', (vs) => room.publicView(vs));
         manager.maybeStart(room);
       } catch (e) {
         cb?.({ ok: false, error: e.message });

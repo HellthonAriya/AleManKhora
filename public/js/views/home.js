@@ -12,6 +12,9 @@ import { GomokuGame } from '../gomoku.js';
 import { OthelloGame } from '../othello.js';
 import { DotsGame } from '../dots.js';
 import { BackgammonGame } from '../backgammon.js';
+import { HokmRenderer } from '../hokmboard.js';
+import { HokmGame } from '../hokm.js';
+import { chooseHokmAction } from '../hokmAI.js';
 
 const SIMPLE_COLORS = {
   tictactoe: ['#36c6ff', '#ff6b6b'],
@@ -35,6 +38,7 @@ export function HomeView() {
   const gomokuPrev = h('canvas', { class: 'game-prev-canvas' });
   const dotsPrev = h('canvas', { class: 'game-prev-canvas' });
   const tttPrev = h('canvas', { class: 'game-prev-canvas' });
+  const hokmPrev = h('canvas', { class: 'game-prev-canvas' });
 
   const view = h('div', { class: 'fade-in' },
     h('section', { class: 'hero' },
@@ -61,6 +65,7 @@ export function HomeView() {
         gameCard(othelloPrev, '⚫', 'اوتلو', 'مهره بگذار، ردیف حریف را محاصره کن و به رنگ خودت برگردان.'),
         gameCard(gomokuPrev, '⬤', 'گوموکو', 'پنج مهره پشت‌سرهم در یک خط بچین تا ببری.'),
         gameCard(dotsPrev, '▦', 'نقطه‌خط', 'خط بکش و مربع ببند؛ هر مربع که بستی دوباره نوبت توست.'),
+        gameCard(hokmPrev, '🃏', 'حکم', 'بازی ورق ایرانی — حُکم را انتخاب کن و دست ببر. ۲ تا ۴ نفره.'),
         gameCard(tttPrev, '✕', 'دوز', 'سه علامت در یک خط — سادهٔ سریع و دوست‌داشتنی.'),
       ),
     ),
@@ -85,6 +90,7 @@ export function HomeView() {
     animateSimplePreview(gomokuPrev, 'gomoku');
     animateSimplePreview(dotsPrev, 'dots');
     animateSimplePreview(tttPrev, 'tictactoe');
+    animateHokmPreview(hokmPrev);
   });
   return view;
 }
@@ -310,6 +316,31 @@ function animateZadePreview(canvas) {
       g.apply(g.turn, { type: 'move', from: pick.from, to: pick.to, promo: pick.promo });
       moves++;
       r.setState(g.toState());
+    } catch {}
+    setTimeout(step, 900);
+  };
+  setTimeout(step, 900);
+}
+
+/* ---------- حکم animated preview ---------- */
+
+function animateHokmPreview(canvas) {
+  const r = new HokmRenderer(canvas);
+  r.setConfig({ colors: ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'] });
+  r.setMySeat(0);
+  let g, moves = 0;
+  const newGame = () => { g = new HokmGame({ variant: '4' }); moves = 0; r.setState(g.toStateFor(0)); };
+  newGame();
+  const restart = () => { if (isGone(canvas)) return; newGame(); setTimeout(step, 900); };
+  const step = () => {
+    if (isGone(canvas)) return;
+    try {
+      if (g.isOver() || moves >= 40) { setTimeout(restart, 1800); return; }
+      const a = chooseHokmAction(g, g.turn, 'normal');
+      if (!a) { setTimeout(restart, 1800); return; }
+      g.apply(g.turn, a);
+      moves++;
+      r.setState(g.toStateFor(0));
     } catch {}
     setTimeout(step, 900);
   };

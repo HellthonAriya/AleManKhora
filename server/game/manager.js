@@ -13,6 +13,7 @@ import { GomokuGame } from './gomoku.js';
 import { OthelloGame } from './othello.js';
 import { DotsGame } from './dots.js';
 import { BackgammonGame } from './backgammon.js';
+import { HokmGame } from './hokm.js';
 import { chooseAction } from './ai.js';
 import { chooseChessAction } from './chessAI.js';
 import { chooseTicTacToeAction } from './tictactoeAI.js';
@@ -20,10 +21,11 @@ import { chooseGomokuAction } from './gomokuAI.js';
 import { chooseOthelloAction } from './othelloAI.js';
 import { chooseDotsAction } from './dotsAI.js';
 import { chooseBackgammonAction } from './backgammonAI.js';
+import { chooseHokmAction } from './hokmAI.js';
 import { Games, applyEloResult, applyEloDraw } from '../models.js';
 import db, { getSettings } from '../db.js';
 
-const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
+const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'hokm'];
 // The simple 2-player board games that share one lightweight customizer/config.
 const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 
@@ -38,6 +40,7 @@ function buildEngine(gameType, config) {
     case 'othello': return new OthelloGame();
     case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5 });
     case 'backgammon': return new BackgammonGame();
+    case 'hokm': return new HokmGame({ variant: config.variant });
     default: return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
   }
 }
@@ -122,9 +125,27 @@ function sanitizeChessConfig(cfg, gameType) {
   };
 }
 
+const HOKM_DEFAULT_COLORS = ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'];
+function sanitizeHokmConfig(cfg) {
+  const variant = ['2', '3', '4'].includes(String(cfg.variant)) ? String(cfg.variant) : '4';
+  const players = Number(variant);
+  const colorRe = /^#[0-9a-fA-F]{6}$/;
+  const incoming = Array.isArray(cfg.colors) ? cfg.colors : [];
+  const colors = [];
+  for (let i = 0; i < players; i++) colors.push(colorRe.test(incoming[i]) ? incoming[i] : HOKM_DEFAULT_COLORS[i]);
+  const timeLimit = TIME_LIMITS.includes(parseInt(cfg.timeLimit, 10)) ? parseInt(cfg.timeLimit, 10) : 0;
+  const timeIncrement = TIME_INCREMENTS.includes(parseInt(cfg.timeIncrement, 10)) ? parseInt(cfg.timeIncrement, 10) : 0;
+  return {
+    gameType: 'hokm', variant, players, teams: variant === '4', colors,
+    p0Color: colors[0], p1Color: colors[1],
+    timeLimit, timeIncrement, ranked: false,
+  };
+}
+
 function sanitizeConfig(cfg = {}) {
   const gameType = GAME_TYPES.includes(cfg.gameType) ? cfg.gameType : 'quoridor';
   if (gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade') return sanitizeChessConfig(cfg, gameType);
+  if (gameType === 'hokm') return sanitizeHokmConfig(cfg);
   if (SIMPLE_TYPES.includes(gameType)) return sanitizeSimpleConfig(cfg, gameType);
 
   const s = getSettings();
@@ -202,7 +223,14 @@ class Room {
   isFull() { return this.players.every((p) => p); }
   humanSeats() { return this.players.map((p, i) => (p && !p.isAI ? i : -1)).filter((i) => i >= 0); }
 
-  publicView() {
+  /** Game state as seen by `viewerSeat` (hidden-info games redact other hands). */
+  stateFor(viewerSeat = -1) {
+    return (this.game.hidden && typeof this.game.toStateFor === 'function')
+      ? this.game.toStateFor(viewerSeat)
+      : this.game.toState();
+  }
+
+  publicView(viewerSeat = -1) {
     return {
       id: this.id,
       mode: this.mode,
@@ -217,7 +245,7 @@ class Room {
       aiSeats: [...this.aiSeats],
       spectators: this.spectators.size,
       clock: this.clockView(),
-      state: this.game.toState(),
+      state: this.stateFor(viewerSeat),
     };
   }
 
@@ -310,7 +338,7 @@ export class GameManager {
       this._persistStart(room);
       this.startClock(room);
       this.resetIdleTimer(room);
-      this.broadcast(room, 'game:start', room.publicView());
+      this.emitPerSeat(room, 'game:start', (s) => room.publicView(s));
       this.maybeRunAI(room);
       return true;
     }
@@ -393,11 +421,11 @@ export class GameManager {
     const result = room.game.apply(seat, action);
     this.chargeClock(room, seat);
     room.lastActivity = Date.now();
-    this.broadcast(room, 'game:update', {
+    this.emitPerSeat(room, 'game:update', (s) => ({
       action: { seat, ...action },
-      state: result.state,
+      state: room.stateFor(s),
       turn: result.state.turn,
-    });
+    }));
     if (room.game.isOver()) {
       this.finishGame(room, room.game.winner);
     } else {
@@ -418,6 +446,7 @@ export class GameManager {
       case 'othello': return chooseOthelloAction(room.game, seat, room.aiDifficulty);
       case 'dots': return chooseDotsAction(room.game, seat, room.aiDifficulty);
       case 'backgammon': return chooseBackgammonAction(room.game, seat, room.aiDifficulty);
+      case 'hokm': return chooseHokmAction(room.game, seat, room.aiDifficulty);
       default: return chooseAction(room.game, seat, room.aiDifficulty);
     }
   }
@@ -455,7 +484,7 @@ export class GameManager {
   playerOut(room, seat, reason = 'resign') {
     if (room.status !== 'active') return;
     const over = room.game.eliminate(seat);
-    this.broadcast(room, 'player:eliminated', { seat, reason, state: room.game.toState() });
+    this.emitPerSeat(room, 'player:eliminated', (s) => ({ seat, reason, state: room.stateFor(s) }));
     if (over || room.game.isOver()) {
       this.finishGame(room, room.game.winner);
     } else {
@@ -526,7 +555,7 @@ export class GameManager {
     room.rematchVotes.clear();
     this.startClock(room);
     this.resetIdleTimer(room);
-    this.broadcast(room, 'game:start', room.publicView());
+    this.emitPerSeat(room, 'game:start', (s) => room.publicView(s));
     this.maybeRunAI(room);
   }
 
@@ -674,6 +703,22 @@ export class GameManager {
 
   broadcast(room, event, payload) {
     this.io.to(room.id).emit(event, payload);
+  }
+
+  /**
+   * Emit a state-bearing event. For hidden-information games (Hokm) each player
+   * receives a payload built for their own seat (so they only see their own
+   * cards) and spectators get the fully-redacted (-1) view. For everything else
+   * this is a single room-wide broadcast.
+   * @param {(viewerSeat:number)=>object} build
+   */
+  emitPerSeat(room, event, build) {
+    if (!room.game.hidden) { this.broadcast(room, event, build(-1)); return; }
+    for (let s = 0; s < room.players.length; s++) {
+      const p = room.players[s];
+      if (p && p.socketId) this.io.to(p.socketId).emit(event, build(s));
+    }
+    for (const sid of room.spectators) this.io.to(sid).emit(event, build(-1));
   }
 
   /** Summaries of active games for the lobby's "watch live" panel. */

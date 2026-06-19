@@ -7,11 +7,13 @@ import { ChessGame, randomChessSetup } from './chess.js';
 import { GridRenderer } from './gridboard.js';
 import { DotsRenderer } from './dotsboard.js';
 import { BackgammonRenderer } from './backgammonboard.js';
+import { HokmRenderer } from './hokmboard.js';
 import { TicTacToeGame } from './tictactoe.js';
 import { GomokuGame } from './gomoku.js';
 import { OthelloGame } from './othello.js';
 import { DotsGame } from './dots.js';
 import { BackgammonGame } from './backgammon.js';
+import { HokmGame } from './hokm.js';
 
 const CHESS_SWATCHES = ['#f3f1ea', '#2b2b30', '#e7503a', '#3d7fe0', '#e8b730', '#3bb15f', '#9b8cff', '#36c6ff'];
 const SIMPLE_SWATCHES = ['#1b1d22', '#f1ece0', '#efe9dc', '#36c6ff', '#ff6b6b', '#ffd36b', '#3bb15f', '#9b8cff', '#e7503a'];
@@ -20,8 +22,91 @@ const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 /** Pick the right customizer for a game type. Returns { element, getConfig }. */
 export function makeCustomizer(gameType, opts = {}) {
   if (gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade') return ChessCustomizer({ gameType, ...opts });
+  if (gameType === 'hokm') return HokmCustomizer(opts);
   if (SIMPLE_TYPES.includes(gameType)) return SimpleCustomizer({ gameType, ...opts });
   return GameCustomizer(opts);
+}
+
+const HOKM_COLORS = ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'];
+
+/**
+ * Hokm customizer: number of players (4 teams / 3 / 2), per-seat colours, time
+ * control, and a live preview dealt from the viewer's seat. Returns
+ * { element, getConfig }.
+ */
+export function HokmCustomizer() {
+  const cfg = { gameType: 'hokm', variant: '4', colors: [...HOKM_COLORS], timeLimit: 0, timeIncrement: 0 };
+
+  const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
+  let renderer = null;
+  function refreshPreview() {
+    if (!renderer) renderer = new HokmRenderer(previewCanvas);
+    const g = new HokmGame({ variant: cfg.variant });
+    renderer.setConfig({ colors: [...cfg.colors] });
+    renderer.setMySeat(0);
+    renderer.setState(g.toStateFor(0));
+  }
+
+  const players = () => Number(cfg.variant);
+
+  const variantSeg = seg([
+    { label: '۴ نفره (تیمی)', value: '4', active: true },
+    { label: '۳ نفره', value: '3', active: false },
+    { label: '۲ نفره', value: '2', active: false },
+  ], (v) => { cfg.variant = v; rebuildColors(); refreshPreview(); });
+
+  const colorsMount = h('div', {});
+  function colorPick(idx) {
+    const wrap = h('div', { class: 'swatches' });
+    SIMPLE_SWATCHES.forEach((col) => {
+      wrap.append(h('div', {
+        class: 'swatch' + (col === cfg.colors[idx] ? ' active' : ''),
+        style: `background:${col}`,
+        onclick: () => { cfg.colors[idx] = col; [...wrap.children].forEach((c, i) => c.classList.toggle('active', SIMPLE_SWATCHES[i] === col)); pickInput.value = col; refreshPreview(); },
+      }));
+    });
+    const pickInput = h('input', { type: 'color', value: cfg.colors[idx],
+      oninput: (e) => { cfg.colors[idx] = e.target.value; [...wrap.children].forEach((c) => c.classList.remove('active')); refreshPreview(); } });
+    wrap.append(h('div', { class: 'color-pick' }, pickInput));
+    return wrap;
+  }
+  function rebuildColors() {
+    colorsMount.innerHTML = '';
+    const teams = cfg.variant === '4';
+    for (let i = 0; i < players(); i++) {
+      const label = i === 0 ? 'رنگ تو'
+        : teams && i === 2 ? 'رنگ هم‌تیمی'
+        : `رنگ بازیکن ${['۱', '۲', '۳', '۴'][i]}`;
+      colorsMount.append(optGroup(label, colorPick(i)));
+    }
+  }
+  rebuildColors();
+
+  const timeSeg = seg(TIME_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeLimit })),
+    (v) => { cfg.timeLimit = v; incMount.style.display = v ? '' : 'none'; });
+  const incMount = h('div', { style: 'display:none' },
+    optGroup('پاداش زمانی هر حرکت', seg(INC_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeIncrement })),
+      (v) => { cfg.timeIncrement = v; })));
+
+  const leftCol = h('div', { style: 'flex:1.2' },
+    optGroup('تعداد بازیکنان', variantSeg),
+    optGroup('کنترل زمان (تایمر)', timeSeg),
+    incMount,
+    colorsMount,
+  );
+
+  const element = h('div', { class: 'row', style: 'align-items:flex-start' },
+    leftCol,
+    h('div', { style: 'flex:1' },
+      h('label', { class: 'opt-group', style: 'display:block;color:var(--text-dim);font-size:.82rem;font-weight:700;margin-bottom:9px' }, 'پیش‌نمایش زنده'),
+      previewCanvas),
+  );
+
+  requestAnimationFrame(refreshPreview);
+  return {
+    element,
+    getConfig: () => ({ gameType: 'hokm', variant: cfg.variant, colors: cfg.colors.slice(0, players()), timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement }),
+  };
 }
 
 const TIME_OPTIONS = [
