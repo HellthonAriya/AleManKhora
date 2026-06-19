@@ -67,21 +67,14 @@ function feature(ico, title, text) {
   return h('div', { class: 'feature' }, h('div', { class: 'ico' }, ico), h('h3', {}, title), h('p', {}, text));
 }
 
-function watchCanvas(canvas) {
-  let stopped = false;
-  const obs = new MutationObserver(() => {
-    if (!document.body.contains(canvas)) { stopped = true; obs.disconnect(); }
-  });
-  obs.observe(document.body, { childList: true, subtree: true });
-  return { get stopped() { return stopped; } };
-}
+// Returns true once the canvas is no longer part of the live document.
+function isGone(canvas) { return !document.body.contains(canvas); }
 
 /* ---------- Quoridor animated preview ---------- */
 
 function animateQuoridorPreview(canvas) {
   const r = new BoardRenderer(canvas);
   r.setConfig({ theme: 'emerald', p0Color: '#36c6ff', p1Color: '#ffd36b' });
-  const sentinel = watchCanvas(canvas);
 
   let g, moves = 0;
 
@@ -93,13 +86,13 @@ function animateQuoridorPreview(canvas) {
   newGame();
 
   const restart = () => {
-    if (sentinel.stopped) return;
+    if (isGone(canvas)) return;
     newGame();
     setTimeout(step, 700);
   };
 
   const step = () => {
-    if (sentinel.stopped) return;
+    if (isGone(canvas)) return;
     try {
       if (g.winner !== null || moves >= 30) { setTimeout(restart, 1200); return; }
       const me = g.turn;
@@ -159,7 +152,6 @@ function animateChessPreview(canvas, variant) {
     boardTheme: is4 ? 'midnight' : 'green',
     colors: is4 ? ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'] : ['#f3f1ea', '#2b2b30'],
   });
-  const sentinel = watchCanvas(canvas);
 
   let g, moves = 0, openIdx = 0, openStep = 0;
   const RESTART_AFTER = is4 ? 20 : 28;
@@ -181,23 +173,21 @@ function animateChessPreview(canvas, variant) {
       const pick = caps.length && Math.random() < 0.55
         ? caps[Math.floor(Math.random() * caps.length)]
         : ms[Math.floor(Math.random() * ms.length)];
-      // engine defaults promo to 'q' if action.promo is absent and pawn promotes
       g.apply(seat, { type: 'move', from: pick.from, to: pick.to, promo: pick.promo });
     } catch {}
   };
 
   const restart = () => {
-    if (sentinel.stopped) return;
+    if (isGone(canvas)) return;
     newGame();
     setTimeout(step, 700);
   };
 
   const step = () => {
-    if (sentinel.stopped) return;
+    if (isGone(canvas)) return;
     try {
       if (g.gameOver || moves >= RESTART_AFTER) { setTimeout(restart, 1400); return; }
       const seat = g.turn;
-      // Follow scripted opening for 2p games, then switch to random
       if (!is4 && openStep < OPENINGS_2P[openIdx].length) {
         const [s, from, to] = OPENINGS_2P[openIdx][openStep];
         openStep++;
