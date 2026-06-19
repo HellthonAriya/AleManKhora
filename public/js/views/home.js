@@ -83,36 +83,42 @@ function animateQuoridorPreview(canvas) {
   r.setConfig({ theme: 'emerald', p0Color: '#36c6ff', p1Color: '#ffd36b' });
   const sentinel = watchCanvas(canvas);
 
-  const newGame = () => new QuoridorGame({ size: 7, wallsEach: 6 });
-  let g = newGame();
-  r.setState(g.toState(), { animate: false });
+  let g, moves = 0;
+
+  const newGame = () => {
+    g = new QuoridorGame({ size: 7, wallsEach: 6 });
+    moves = 0;
+    r.setState(g.toState(), { animate: false });
+  };
+  newGame();
+
+  const restart = () => {
+    if (sentinel.stopped) return;
+    newGame();
+    setTimeout(step, 700);
+  };
 
   const step = () => {
     if (sentinel.stopped) return;
-    if (g.winner !== null) {
-      setTimeout(() => {
-        if (sentinel.stopped) return;
-        g = newGame();
-        r.setState(g.toState(), { animate: false });
-        setTimeout(step, 700);
-      }, 1400);
-      return;
-    }
-    const me = g.turn;
-    let acted = false;
-    if (g.wallsLeft[me] > 0 && Math.random() < 0.28) {
-      const walls = g.allWallPlacements(me);
-      if (walls.length) {
-        try { g.apply(me, walls[Math.floor(Math.random() * walls.length)]); acted = true; } catch {}
+    try {
+      if (g.winner !== null || moves >= 30) { setTimeout(restart, 1200); return; }
+      const me = g.turn;
+      let acted = false;
+      if (g.wallsLeft[me] > 0 && Math.random() < 0.28) {
+        const walls = g.allWallPlacements(me);
+        if (walls.length) {
+          try { g.apply(me, walls[Math.floor(Math.random() * walls.length)]); acted = true; } catch {}
+        }
       }
-    }
-    if (!acted) {
-      const moves = g.legalMoves(me);
-      const goal = g.goals[me].value;
-      moves.sort((a, b) => Math.abs(a.r - goal) - Math.abs(b.r - goal));
-      try { g.apply(me, { type: 'move', ...moves[0] }); } catch {}
-    }
-    r.setState(g.toState());
+      if (!acted) {
+        const ms = g.legalMoves(me);
+        const goal = g.goals[me].value;
+        ms.sort((a, b) => Math.abs(a.r - goal) - Math.abs(b.r - goal));
+        try { g.apply(me, { type: 'move', ...ms[0] }); } catch {}
+      }
+      moves++;
+      r.setState(g.toState());
+    } catch {}
     setTimeout(step, 950);
   };
   setTimeout(step, 800);
@@ -120,24 +126,29 @@ function animateQuoridorPreview(canvas) {
 
 /* ---------- Chess animated preview ---------- */
 
-const CHESS_OPENINGS_2P = [
-  // e4 e5 Nf3 Nc6 Bc4 (Italian)
+// Scripted openings for visual interest in 2p preview
+const OPENINGS_2P = [
+  // Italian: e4 e5 Nf3 Nc6 Bc4
   [
-    [0, { type: 'move', from: { r: 6, c: 4 }, to: { r: 4, c: 4 } }],
-    [1, { type: 'move', from: { r: 1, c: 4 }, to: { r: 3, c: 4 } }],
-    [0, { type: 'move', from: { r: 7, c: 6 }, to: { r: 5, c: 5 } }],
-    [1, { type: 'move', from: { r: 0, c: 1 }, to: { r: 2, c: 2 } }],
-    [0, { type: 'move', from: { r: 7, c: 5 }, to: { r: 4, c: 2 } }],
-    [1, { type: 'move', from: { r: 1, c: 2 }, to: { r: 3, c: 2 } }],
+    [0, { r: 6, c: 4 }, { r: 4, c: 4 }],
+    [1, { r: 1, c: 4 }, { r: 3, c: 4 }],
+    [0, { r: 7, c: 6 }, { r: 5, c: 5 }],
+    [1, { r: 0, c: 1 }, { r: 2, c: 2 }],
+    [0, { r: 7, c: 5 }, { r: 4, c: 2 }],
+    [1, { r: 1, c: 2 }, { r: 3, c: 2 }],
+    [0, { r: 7, c: 3 }, { r: 5, c: 3 }],  // Qd1-d3
+    [1, { r: 0, c: 6 }, { r: 2, c: 5 }],  // Nf6
   ],
-  // d4 d5 c4 e6 (Queen's Gambit)
+  // Queen's Gambit: d4 d5 c4 e6 Nf3 Nf6
   [
-    [0, { type: 'move', from: { r: 6, c: 3 }, to: { r: 4, c: 3 } }],
-    [1, { type: 'move', from: { r: 1, c: 3 }, to: { r: 3, c: 3 } }],
-    [0, { type: 'move', from: { r: 6, c: 2 }, to: { r: 4, c: 2 } }],
-    [1, { type: 'move', from: { r: 1, c: 4 }, to: { r: 2, c: 4 } }],
-    [0, { type: 'move', from: { r: 7, c: 6 }, to: { r: 5, c: 5 } }],
-    [1, { type: 'move', from: { r: 0, c: 6 }, to: { r: 2, c: 5 } }],
+    [0, { r: 6, c: 3 }, { r: 4, c: 3 }],
+    [1, { r: 1, c: 3 }, { r: 3, c: 3 }],
+    [0, { r: 6, c: 2 }, { r: 4, c: 2 }],
+    [1, { r: 1, c: 4 }, { r: 2, c: 4 }],
+    [0, { r: 7, c: 6 }, { r: 5, c: 5 }],
+    [1, { r: 0, c: 6 }, { r: 2, c: 5 }],
+    [0, { r: 7, c: 1 }, { r: 5, c: 2 }],
+    [1, { r: 0, c: 1 }, { r: 2, c: 2 }],
   ],
 ];
 
@@ -146,52 +157,62 @@ function animateChessPreview(canvas, variant) {
   const r = new ChessBoardRenderer(canvas);
   r.setConfig({
     boardTheme: is4 ? 'midnight' : 'green',
-    colors: is4
-      ? ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f']
-      : ['#f3f1ea', '#2b2b30'],
+    colors: is4 ? ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'] : ['#f3f1ea', '#2b2b30'],
   });
   const sentinel = watchCanvas(canvas);
 
-  let g, openingIdx = 0, openingStep = 0;
+  let g, moves = 0, openIdx = 0, openStep = 0;
+  const RESTART_AFTER = is4 ? 20 : 28;
 
   const newGame = () => {
     g = new ChessGame({ variant });
-    openingIdx = Math.floor(Math.random() * CHESS_OPENINGS_2P.length);
-    openingStep = 0;
+    moves = 0;
+    openIdx = Math.floor(Math.random() * OPENINGS_2P.length);
+    openStep = 0;
     r.setState(g.toState(), { animate: false });
   };
   newGame();
 
-  const randomMove = (seat) => {
-    const moves = g.legalMoves(seat);
-    if (!moves.length) return;
-    // prefer captures for visual excitement
-    const caps = moves.filter((m) => g.board[m.to.r]?.[m.to.c] || m.ep || m.promo);
-    const pick = caps.length && Math.random() < 0.6
-      ? caps[Math.floor(Math.random() * caps.length)]
-      : moves[Math.floor(Math.random() * moves.length)];
-    const action = { type: 'move', from: pick.from, to: pick.to, promo: pick.promo ?? (pick.to.r === 0 || pick.to.r === 7 ? 'q' : undefined) };
-    try { g.apply(seat, action); } catch {}
+  const playRandom = (seat) => {
+    try {
+      const ms = g.legalMoves(seat);
+      if (!ms.length) return;
+      const caps = ms.filter((m) => g.board[m.to.r]?.[m.to.c] || m.ep);
+      const pick = caps.length && Math.random() < 0.55
+        ? caps[Math.floor(Math.random() * caps.length)]
+        : ms[Math.floor(Math.random() * ms.length)];
+      // engine defaults promo to 'q' if action.promo is absent and pawn promotes
+      g.apply(seat, { type: 'move', from: pick.from, to: pick.to, promo: pick.promo });
+    } catch {}
+  };
+
+  const restart = () => {
+    if (sentinel.stopped) return;
+    newGame();
+    setTimeout(step, 700);
   };
 
   const step = () => {
     if (sentinel.stopped) return;
-    if (g.gameOver) {
-      setTimeout(() => { if (!sentinel.stopped) { newGame(); setTimeout(step, 600); } }, 1600);
-      return;
-    }
-    const seat = g.turn;
-    if (!is4 && openingStep < CHESS_OPENINGS_2P[openingIdx].length) {
-      const [s, action] = CHESS_OPENINGS_2P[openingIdx][openingStep];
-      if (s === seat) {
-        try { g.apply(seat, action); openingStep++; } catch { openingStep++; randomMove(seat); }
+    try {
+      if (g.gameOver || moves >= RESTART_AFTER) { setTimeout(restart, 1400); return; }
+      const seat = g.turn;
+      // Follow scripted opening for 2p games, then switch to random
+      if (!is4 && openStep < OPENINGS_2P[openIdx].length) {
+        const [s, from, to] = OPENINGS_2P[openIdx][openStep];
+        openStep++;
+        if (s === seat) {
+          try { g.apply(seat, { type: 'move', from, to }); }
+          catch { playRandom(seat); }
+        } else {
+          playRandom(seat);
+        }
       } else {
-        randomMove(seat);
+        playRandom(seat);
       }
-    } else {
-      randomMove(seat);
-    }
-    r.setState(g.toState());
+      moves++;
+      r.setState(g.toState());
+    } catch {}
     setTimeout(step, is4 ? 750 : 900);
   };
   setTimeout(step, 900);
