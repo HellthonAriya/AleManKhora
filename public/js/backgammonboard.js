@@ -11,7 +11,7 @@ import { BackgammonGame } from './backgammon.js';
 
 const FELT = '#16321f', FELT2 = '#0f2417', FRAME = '#5a3a1c', FRAME2 = '#73491f';
 const POINT_A = '#d9b572', POINT_B = '#8a4f28', BAR = '#3a2614';
-const GOLD = '#ffd76b', GREEN = '#56e08c';
+const GOLD = '#ffd76b', GREEN = '#56e08c', CYAN = '#46d6ff';
 const MOVE_MS = 260, DICE_MS = 620;
 
 export class BackgammonRenderer {
@@ -25,7 +25,9 @@ export class BackgammonRenderer {
     this.mySeat = -1;
     this.interactive = false;
     this.sel = null;       // selected from (index or 'bar')
-    this.targets = [];     // legal to-values for the selection
+    this.targets = [];     // legal single-die to-values for the selection
+    this.combos = [];      // combined two-dice landings { to, path:[m1,m2] }
+    this._pendingSecond = null; // second leg of a combined move, fired next state
 
     // animation / roll state
     this._anim = null;          // { seat, from, to, t0 } checker slide
@@ -78,10 +80,40 @@ export class BackgammonRenderer {
     this._curTurn = state.turn;
     this._init = true;
 
+    // Fire the queued second leg of a combined (two-dice) move once the first
+    // leg's state has landed.
+    if (this._pendingSecond) {
+      const ps = this._pendingSecond; this._pendingSecond = null;
+      if (state.winner == null && state.turn === this.mySeat) {
+        const eng = this._engine();
+        const ok = eng && eng.legalMoves(this.mySeat).some((m) => m.from === ps.from && m.to === ps.to);
+        if (ok) setTimeout(() => this.onAction?.({ type: 'move', from: ps.from, to: ps.to }), MOVE_MS + 60);
+      }
+    }
+
     this._ensureAnim();
     this.draw();
   }
-  _clearSel() { this.sel = null; this.targets = []; }
+  _clearSel() { this.sel = null; this.targets = []; this.combos = []; }
+
+  /** Two-dice combined landings for the selected source: where the SAME checker
+   *  ends up after using both dice (e.g. 5+2 → 7 away), with both legs legal. */
+  _computeCombos(from) {
+    const base = this._engine();
+    if (!base) return [];
+    const out = new Map();
+    const firsts = base.legalMoves(this.mySeat).filter((m) => m.from === from && m.to !== 'off');
+    for (const m1 of firsts) {
+      let g2; try { g2 = BackgammonGame.fromState(base.toState()); g2.apply(this.mySeat, { type: 'move', from: m1.from, to: m1.to }); } catch { continue; }
+      if (g2.winner != null || g2.turn !== this.mySeat) continue; // turn ended after one die
+      for (const m2 of g2.legalMoves(this.mySeat).filter((m) => m.from === m1.to)) {
+        const key = String(m2.to);
+        if (this.targets.includes(m2.to)) continue; // already a single-die target
+        if (!out.has(key)) out.set(key, { to: m2.to, path: [{ from: m1.from, to: m1.to }, { from: m1.to, to: m2.to }] });
+      }
+    }
+    return [...out.values()];
+  }
   _seatColor(s) { return (this.config.colors && this.config.colors[s]) || ['#efe9dc', '#21242b'][s] || '#ccc'; }
 
   /** Do I still need to tap-to-roll on this turn? */
@@ -207,6 +239,14 @@ export class BackgammonRenderer {
         this.onAction?.({ type: 'move', from, to: want });
         return;
       }
+      // Combined two-dice landing: play the first leg now, queue the second.
+      const combo = want != null && this.combos.find((c) => c.to === want);
+      if (combo) {
+        this._clearSel();
+        this._pendingSecond = combo.path[1];
+        this.onAction?.({ type: 'move', from: combo.path[0].from, to: combo.path[0].to });
+        return;
+      }
     }
     // (re)select a source — this is what lets the same checker use the 2nd die.
     const eng = this._engine();
@@ -227,7 +267,7 @@ export class BackgammonRenderer {
         this.onAction?.({ type: 'move', from, to: tos[0] });
         return;
       }
-      this.sel = from; this.targets = tos;
+      this.sel = from; this.targets = tos; this.combos = this._computeCombos(from);
     } else { this._clearSel(); this._lastTap = null; }
     this._ensureAnim();
     this.draw();
@@ -302,10 +342,20 @@ export class BackgammonRenderer {
     this._offCount(ctx, g, 0, st.off[0]);
     this._offCount(ctx, g, 1, st.off[1]);
 
-    // Legal target landing markers (drawn over points, under flying checker)
+    // Combined two-dice landings (cyan) — drawn first so single-die green wins overlaps
+    for (const c of this.combos) {
+      if (c.to === 'off') {
+        ctx.save(); ctx.globalAlpha = 0.18 + 0.14 * pulse; ctx.fillStyle = CYAN;
+        ctx.fillRect(g.offX, g.m, g.offW, g.fieldH); ctx.restore();
+        ctx.strokeStyle = CYAN; ctx.lineWidth = 2.5; ctx.strokeRect(g.offX + 1.5, g.m + 1.5, g.offW - 3, g.fieldH - 3);
+      } else {
+        this._landingMarker(ctx, this._slot(c.to), st, c.to, g, pulse, CYAN);
+      }
+    }
+    // Legal single-die target landing markers
     for (const t of this.targets) {
       if (t === 'off') continue;
-      this._landingMarker(ctx, this._slot(t), st, t, g, pulse);
+      this._landingMarker(ctx, this._slot(t), st, t, g, pulse, GREEN);
     }
 
     // Flying checkers (move + hit)
@@ -329,16 +379,16 @@ export class BackgammonRenderer {
     ctx.closePath(); ctx.fill(); ctx.restore();
   }
   /** A bright pulsing ring where a checker can land (clearly visible). */
-  _landingMarker(ctx, slot, st, idx, g, pulse) {
+  _landingMarker(ctx, slot, st, idx, g, pulse, color = GREEN) {
     const p = st.points[idx];
     const have = (p && p.seat === this.mySeat) ? p.count : 0;
     const xy = this._checkerXY(slot, have, have + 1, g); // where the new one lands
     const r = g.ckR * (0.82 + 0.12 * pulse);
     ctx.save();
-    ctx.shadowColor = GREEN; ctx.shadowBlur = 14;
+    ctx.shadowColor = color; ctx.shadowBlur = 14;
     ctx.beginPath(); ctx.arc(xy.x, xy.y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = GREEN; ctx.lineWidth = 3; ctx.stroke();
-    ctx.globalAlpha = 0.2 + 0.1 * pulse; ctx.fillStyle = GREEN; ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
+    ctx.globalAlpha = 0.2 + 0.1 * pulse; ctx.fillStyle = color; ctx.fill();
     // rotating dashed outer ring for extra flash
     ctx.globalAlpha = 0.9; ctx.shadowBlur = 0;
     ctx.setLineDash([4, 5]); ctx.lineDashOffset = -(now() / 60) % 100;
