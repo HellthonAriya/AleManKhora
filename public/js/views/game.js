@@ -205,7 +205,21 @@ export function GameView(roomId) {
 
   /* ========================= Core rendering ========================= */
   function act(action) {
-    socket.emit('game:action', { action }, (res) => { if (!res?.ok) toast(res?.error || 'حرکت نامعتبر', 'error'); });
+    socket.emit('game:action', { action }, (res) => {
+      if (res?.ok) return;
+      // The socket may have silently reconnected with a new id, leaving the
+      // server binding stale. Re-join this room and retry the move once before
+      // surfacing any error — the player shouldn't have to refresh.
+      const lost = res?.error === 'بازی یافت نشد' || res?.error === 'شما بازیکن این بازی نیستید';
+      if (lost && !spectator) {
+        rejoinRoom(() => {
+          if (spectator) return;
+          socket.emit('game:action', { action }, (r2) => { if (!r2?.ok) toast(r2?.error || 'حرکت نامعتبر', 'error'); });
+        });
+        return;
+      }
+      toast(res?.error || 'حرکت نامعتبر', 'error');
+    });
   }
   function seatColor(s) {
     if (config?.colors && config.colors[s]) return config.colors[s];
@@ -566,16 +580,57 @@ export function GameView(roomId) {
       : 'بازی مساوی شد.';
   }
 
-  /* ========================= Join ========================= */
-  socket.emit('room:join', { roomId }, (res) => {
-    if (!res?.ok) { toast(res?.error || 'بازی پیدا نشد', 'error'); navigate('/lobby'); return; }
-    seat = res.seat;
-    spectator = !!res.spectator;
-    applyView(res.view);
-    if (res.reconnected) toast('به بازی برگشتی', 'success');
-    if (res.spectator) toast('در حال تماشای زنده', 'success');
-    renderVoicePanel();
-  });
+  /* ========================= Join / reconnect ========================= */
+  let joinedOnce = false;
+  let connLost = false;
+
+  /** (Re)bind this socket to the room and refresh state. Safe to call anytime;
+   *  the server returns the existing seat if we're already seated. */
+  function rejoinRoom(after) {
+    socket.emit('room:join', { roomId }, (res) => {
+      if (!res?.ok) {
+        // The room is genuinely gone (expired / finished and cleaned up).
+        toast(res?.error || (joinedOnce ? 'بازی دیگر در دسترس نیست' : 'بازی پیدا نشد'), 'error');
+        navigate('/lobby');
+        return;
+      }
+      const firstTime = !joinedOnce;
+      seat = res.seat;
+      spectator = !!res.spectator;
+      applyView(res.view);
+      joinedOnce = true;
+      connLost = false; updateConnBanner();
+      if (firstTime) {
+        if (res.reconnected) toast('به بازی برگشتی', 'success');
+        if (res.spectator) toast('در حال تماشای زنده', 'success');
+        renderVoicePanel();
+      }
+      after?.();
+    });
+  }
+
+  // Auto re-join whenever the socket (re)connects after the first join — mobile
+  // backgrounding / network blips drop the socket and it returns with a NEW id,
+  // which would otherwise leave moves failing with «بازی یافت نشد».
+  function onConnect() { if (joinedOnce) rejoinRoom(); }
+  function onDisconnect() { connLost = true; updateConnBanner(); }
+  function onVisible() {
+    if (document.visibilityState === 'visible' && !socket.connected) socket.connect();
+  }
+  socket.on('connect', onConnect);
+  socket.on('disconnect', onDisconnect);
+  document.addEventListener('visibilitychange', onVisible);
+
+  function updateConnBanner() {
+    if (connLost) {
+      clear(turnBanner);
+      turnBanner.append(h('span', { class: 'spinner spinner-sm' }), ' اتصال قطع شد — در حال اتصال مجدد…');
+    } else if (state) {
+      updateBanner(isMyTurnActive());
+    }
+  }
+
+  rejoinRoom();
 
   /* ========================= Layout ========================= */
   sideTop.append(playerCardsMount, controlsMount);
@@ -603,6 +658,9 @@ export function GameView(roomId) {
 
   view.addEventListener('view:destroy', () => {
     for (const [ev, fn] of Object.entries(handlers)) socket.off(ev, fn);
+    socket.off('connect', onConnect);
+    socket.off('disconnect', onDisconnect);
+    document.removeEventListener('visibilitychange', onVisible);
     if (clockTimer) clearInterval(clockTimer);
     dragGhost?.remove();
     document.removeEventListener('pointermove', onDragMove);
