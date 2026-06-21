@@ -35,6 +35,8 @@ export class BackgammonRenderer {
     this._curTurn = null;
     this._init = false;
     this._raf = null;
+    this._lastTap = null;       // { from, t } for double-tap detection
+    this._particles = [];       // sparkle bursts (hits / bear-offs)
 
     this._dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     this._bind();
@@ -61,6 +63,10 @@ export class BackgammonRenderer {
     if (mv) {
       this._anim = { ...mv, t0: now() };
       if (mv.hit != null) this._hitAnim = { seat: mv.hitSeat, to: mv.to, t0: now() };
+      // Flashy bursts: a hit, or bearing a checker off, throws sparks.
+      const g = this._geo();
+      if (mv.hit != null) { const s = this._slot(mv.to); this._spawnBurst(s.x, s.y + (s.top ? g.ckR : -g.ckR), '#ff5b6b', 16); }
+      if (mv.to === 'off') { const os = this._offSlot(mv.seat, g); this._spawnBurst(os.x, os.y + (os.top ? g.ckR : -g.ckR), GOLD, 20); }
     }
 
     // Roll gating: a fresh turn (no dice spent) by the opponent auto-tumbles;
@@ -94,6 +100,7 @@ export class BackgammonRenderer {
     const active = () => {
       const t = now();
       if (this._anim || this._hitAnim) return true;
+      if (this._particles.length) return true;
       if (t < this._diceUntil) return true;
       if (this.interactive && (this.sel != null || this._needRoll())) return true; // pulse
       return false;
@@ -140,11 +147,19 @@ export class BackgammonRenderer {
     const y = top ? g.topY : g.botY;
     return { x, y, top };
   }
-  /** Centre of the k-th checker (0 = nearest baseline) in a point/bar stack. */
-  _checkerXY(slot, k, g) {
+  /** Vertical step between stacked checkers — compresses for tall stacks so a
+   *  big column shows every checker (overlapping) instead of a number. */
+  _stackStep(count, g) {
     const r = g.ckR;
-    const kk = Math.min(k, 4);
-    const cy = slot.top ? slot.y + r + kk * 2 * r : slot.y - r - kk * 2 * r;
+    if (count <= 5) return 2 * r;
+    const maxH = g.fieldH * 0.46;
+    return Math.max(r * 0.5, (maxH - 2 * r) / (count - 1));
+  }
+  /** Centre of the k-th checker (0 = nearest baseline) in a stack of `count`. */
+  _checkerXY(slot, k, count, g) {
+    const r = g.ckR;
+    const step = this._stackStep(count, g);
+    const cy = slot.top ? slot.y + r + k * step : slot.y - r - k * step;
     return { x: slot.x, y: cy };
   }
   _barSlot(seat, g) { return { x: g.barX + g.barW / 2, y: seat === 0 ? g.botY : g.topY, top: seat !== 0 }; }
@@ -201,8 +216,19 @@ export class BackgammonRenderer {
     if (hit.kind === 'bar' && this.state.bar[this.mySeat] > 0) from = 'bar';
     else if (hit.kind === 'point') from = hit.index;
     const tos = moves.filter((mv) => mv.from === from).map((mv) => mv.to);
-    if (from != null && tos.length) { this.sel = from; this.targets = tos; }
-    else this._clearSel();
+    if (from != null && tos.length) {
+      // Double-tap (or tap an already-selected checker) that has exactly ONE
+      // legal move → play it straight away.
+      const dbl = this._lastTap && this._lastTap.from === from && (now() - this._lastTap.t) < 450;
+      const already = this.sel === from;
+      this._lastTap = { from, t: now() };
+      if (tos.length === 1 && (dbl || already)) {
+        this._clearSel();
+        this.onAction?.({ type: 'move', from, to: tos[0] });
+        return;
+      }
+      this.sel = from; this.targets = tos;
+    } else { this._clearSel(); this._lastTap = null; }
     this._ensureAnim();
     this.draw();
   }
@@ -284,6 +310,8 @@ export class BackgammonRenderer {
 
     // Flying checkers (move + hit)
     this._drawAnims(ctx, g);
+    // Sparkle particles
+    this._drawParticles(ctx);
 
     // Dice / roll prompt
     this._dice(ctx, g, st);
@@ -303,14 +331,19 @@ export class BackgammonRenderer {
   /** A bright pulsing ring where a checker can land (clearly visible). */
   _landingMarker(ctx, slot, st, idx, g, pulse) {
     const p = st.points[idx];
-    const count = (p && p.seat === this.mySeat) ? Math.min(p.count, 5) : 0;
-    const xy = this._checkerXY(slot, count, g);
-    const r = g.ckR * (0.82 + 0.1 * pulse);
+    const have = (p && p.seat === this.mySeat) ? p.count : 0;
+    const xy = this._checkerXY(slot, have, have + 1, g); // where the new one lands
+    const r = g.ckR * (0.82 + 0.12 * pulse);
     ctx.save();
-    ctx.shadowColor = GREEN; ctx.shadowBlur = 12;
+    ctx.shadowColor = GREEN; ctx.shadowBlur = 14;
     ctx.beginPath(); ctx.arc(xy.x, xy.y, r, 0, Math.PI * 2);
     ctx.strokeStyle = GREEN; ctx.lineWidth = 3; ctx.stroke();
-    ctx.globalAlpha = 0.18; ctx.fillStyle = GREEN; ctx.fill();
+    ctx.globalAlpha = 0.2 + 0.1 * pulse; ctx.fillStyle = GREEN; ctx.fill();
+    // rotating dashed outer ring for extra flash
+    ctx.globalAlpha = 0.9; ctx.shadowBlur = 0;
+    ctx.setLineDash([4, 5]); ctx.lineDashOffset = -(now() / 60) % 100;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(xy.x, xy.y, r + g.ckR * 0.28, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   }
   _drawAnims(ctx, g) {
@@ -324,10 +357,10 @@ export class BackgammonRenderer {
     if (this._anim) {
       const t = easeOut(Math.min(1, (now() - this._anim.t0) / MOVE_MS));
       const from = this._anim.from === 'bar' ? this._barSlot(this._anim.seat, g) : this._slot(this._anim.from);
-      const a = this._anim.from === 'bar' ? { x: from.x, y: from.top ? from.y + g.ckR : from.y - g.ckR } : this._checkerXY(from, 0, g);
+      const a = this._anim.from === 'bar' ? { x: from.x, y: from.top ? from.y + g.ckR : from.y - g.ckR } : this._checkerXY(from, 0, 1, g);
       let b;
       if (this._anim.to === 'off') { const os = this._offSlot(this._anim.seat, g); b = { x: os.x, y: os.y + (os.top ? g.ckR : -g.ckR) }; }
-      else { const ds = this._slot(this._anim.to); const dp = this.state.points[this._anim.to]; const k = Math.max(0, ((dp && dp.seat === this._anim.seat) ? dp.count : 1) - 1); b = this._checkerXY(ds, k, g); }
+      else { const ds = this._slot(this._anim.to); const dp = this.state.points[this._anim.to]; const cnt = (dp && dp.seat === this._anim.seat) ? dp.count : 1; b = this._checkerXY(ds, cnt - 1, cnt, g); }
       this._checker(ctx, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, g.ckR, this._anim.seat, true);
     }
   }
@@ -335,16 +368,10 @@ export class BackgammonRenderer {
   _stack(ctx, slot, seat, count, g, selected) {
     if (count <= 0) return;
     const r = g.ckR;
-    const shown = Math.min(count, 5);
-    for (let k = 0; k < shown; k++) {
-      const { x, y } = this._checkerXY(slot, k, g);
-      this._checker(ctx, x, y, r, seat, selected && k === shown - 1);
-    }
-    if (count > 5) {
-      const { x, y } = this._checkerXY(slot, 4, g);
-      ctx.fillStyle = this._lum(this._seatColor(seat)) < 0.5 ? '#fff' : '#111';
-      ctx.font = `bold ${r * 0.9}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(count), x, y);
+    // Draw every checker; tall stacks overlap (compressed step) — no number.
+    for (let k = 0; k < count; k++) {
+      const { x, y } = this._checkerXY(slot, k, count, g);
+      this._checker(ctx, x, y, r, seat, selected && k === count - 1);
     }
   }
   _checker(ctx, cx, cy, r, seat, highlight) {
@@ -395,18 +422,14 @@ export class BackgammonRenderer {
 
     const rolled = st.rolled || [];
     if (!rolled.length) return;
-    // Doubles play four times — show four dice.
-    const isDouble = rolled.length === 2 && rolled[0] === rolled[1];
-    const dice = isDouble ? [rolled[0], rolled[0], rolled[0], rolled[0]] : rolled;
+    const disp = diceDisplay(st);
     const tumbling = now() < this._diceUntil;
-    const used = Math.max(0, dice.length - (st.dice ? st.dice.length : 0));
-    const w = dice.length * sz + (dice.length - 1) * gap;
+    const w = disp.length * sz + (disp.length - 1) * gap;
     const x0 = cxMid - w / 2, y0 = cy - sz / 2;
-    dice.forEach((d, i) => {
+    disp.forEach((entry, i) => {
       const x = x0 + i * (sz + gap);
-      const val = tumbling ? 1 + Math.floor(Math.random() * 6) : d;
-      const spent = !tumbling && i < used;
-      this._dieFace(ctx, x, y0, sz, val, false, spent);
+      const val = tumbling ? 1 + Math.floor(Math.random() * 6) : entry.d;
+      this._dieFace(ctx, x, y0, sz, val, false, !tumbling && entry.spent);
     });
   }
   _dieFace(ctx, x, y, sz, val, blank, spent) {
@@ -414,8 +437,16 @@ export class BackgammonRenderer {
     if (spent) ctx.globalAlpha = 0.3;
     const grad = ctx.createLinearGradient(x, y, x, y + sz);
     grad.addColorStop(0, '#fdfcf7'); grad.addColorStop(1, '#e6e1d2');
+    if (!spent && !blank) { ctx.shadowColor = 'rgba(255,235,170,.6)'; ctx.shadowBlur = 10; }
     this._roundRect(x, y, sz, sz, sz * 0.2); ctx.fillStyle = grad; ctx.fill();
+    ctx.shadowBlur = 0;
     ctx.strokeStyle = 'rgba(0,0,0,.32)'; ctx.lineWidth = 1.5; ctx.stroke();
+    // glossy sheen
+    ctx.globalAlpha = (spent ? 0.3 : 1) * 0.5;
+    const sh = ctx.createLinearGradient(x, y, x, y + sz * 0.5);
+    sh.addColorStop(0, 'rgba(255,255,255,.85)'); sh.addColorStop(1, 'rgba(255,255,255,0)');
+    this._roundRect(x + sz * 0.12, y + sz * 0.08, sz * 0.76, sz * 0.4, sz * 0.14); ctx.fillStyle = sh; ctx.fill();
+    ctx.globalAlpha = spent ? 0.3 : 1;
     if (!blank && val) this._pips(ctx, x, y, sz, val);
     ctx.restore();
   }
@@ -458,6 +489,34 @@ export class BackgammonRenderer {
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
 
+  /* ----------------------------- Particles ------------------------------- */
+  _spawnBurst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 0.6 + Math.random() * 2.2;
+      this._particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6, life: 1, color, r: 1.5 + Math.random() * 2.5, t0: now() });
+    }
+    this._ensureAnim();
+  }
+  _drawParticles(ctx) {
+    if (!this._particles.length) return;
+    const dt = 16;
+    const alive = [];
+    for (const p of this._particles) {
+      p.x += p.vx * dt * 0.06; p.y += p.vy * dt * 0.06; p.vy += 0.08; p.life -= 0.03;
+      if (p.life > 0) {
+        alive.push(p);
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.shadowColor = p.color; ctx.shadowBlur = 8;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    }
+    this._particles = alive;
+  }
+
   /* --------------------------- Move detection ---------------------------- */
   _detectMove(prev, next) {
     if (!prev || !next) return null;
@@ -476,10 +535,26 @@ export class BackgammonRenderer {
   }
 }
 
+/* The number of dice in the full roll (doubles play four times). */
+function fullDiceCount(st) {
+  const r = st.rolled || [];
+  return (r.length === 2 && r[0] === r[1]) ? 4 : r.length;
+}
 /* How many of the originally-rolled dice have been consumed this turn. */
 function countUsed(st) {
-  const rolled = st.rolled || [], remaining = st.dice || [];
-  return Math.max(0, rolled.length - remaining.length);
+  return Math.max(0, fullDiceCount(st) - (st.dice ? st.dice.length : 0));
+}
+/* Per-die display list: { d, spent } with the actually-consumed faces greyed. */
+function diceDisplay(st) {
+  const r = st.rolled || [];
+  const isDouble = r.length === 2 && r[0] === r[1];
+  const full = isDouble ? [r[0], r[0], r[0], r[0]] : r.slice();
+  const rem = (st.dice || []).slice();
+  return full.map((d) => {
+    const i = rem.indexOf(d);
+    if (i >= 0) { rem.splice(i, 1); return { d, spent: false }; }
+    return { d, spent: true };
+  });
 }
 function now() { return (typeof performance !== 'undefined' ? performance : Date).now(); }
 function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
