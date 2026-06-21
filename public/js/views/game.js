@@ -32,6 +32,8 @@ export function GameView(roomId) {
   let isChess = false;
   let rematchPending = false; // true after we vote for a rematch, until it starts
   let overModalHandle = null; // handle to the open game-over popup, if any
+  let drawWaitModal = null;   // our "waiting for opponent" draw popup (offerer side)
+  let drawRecvModal = null;   // the incoming draw-offer popup (receiver side)
 
   // local clock model
   let clock = { enabled: false, remaining: [], turn: 0, running: false, incMs: 0, limitMs: 0 };
@@ -434,8 +436,19 @@ export function GameView(roomId) {
     if (await confirmDialog('تسلیم شدن', 'مطمئنی می‌خواهی تسلیم شوی؟', { danger: true, confirmLabel: 'تسلیم' })) socket.emit('game:resign');
   }
   function offerDraw() {
-    socket.emit('game:drawOffer', () => {});
-    toast('پیشنهاد مساوی فرستاده شد');
+    if (drawWaitModal) { toast('یک پیشنهاد مساوی در جریان است', 'error'); return; }
+    socket.emit('game:drawOffer', (res) => {
+      if (!res?.ok) { toast(res?.error || 'پیشنهاد مساوی ارسال نشد', 'error'); return; }
+      drawWaitModal = modal({
+        title: '🤝 پیشنهاد مساوی',
+        body: h('div', { class: 'center' },
+          h('span', { class: 'spinner spinner-sm' }), ' در انتظار پاسخ حریف…'),
+        actions: [
+          { label: 'لغو درخواست', class: 'btn-ghost', onClick: () => { socket.emit('game:drawCancel'); } },
+        ],
+        onClose: () => { drawWaitModal = null; },
+      });
+    });
   }
 
   /* ========================= Chat ========================= */
@@ -481,16 +494,22 @@ export function GameView(roomId) {
     'chat:message': (m) => addChat(m),
     'game:rematchVote': ({ votes }) => toast(`درخواست بازی مجدد (${faNum(votes.length)})`),
     'game:drawOffer': ({ name }) => {
-      modal({
+      if (drawRecvModal) return; // don't stack repeated offers
+      drawRecvModal = modal({
         title: '🤝 پیشنهاد مساوی',
         body: h('p', { class: 'muted' }, `«${name}» به تو پیشنهاد مساوی داده است.`),
         actions: [
           { label: 'رد', class: 'btn-ghost', onClick: () => socket.emit('game:drawRespond', { accept: false }) },
           { label: 'قبول مساوی', class: 'btn-primary', onClick: () => socket.emit('game:drawRespond', { accept: true }) },
         ],
+        onClose: () => { drawRecvModal = null; },
       });
     },
-    'game:drawDeclined': () => toast('پیشنهاد مساوی رد شد', 'error'),
+    'game:drawCancelled': () => {
+      if (drawRecvModal) { drawRecvModal.close(); drawRecvModal = null; }
+      toast('پیشنهاد مساوی پس گرفته شد');
+    },
+    'game:drawDeclined': () => { if (drawWaitModal) { drawWaitModal.close(); drawWaitModal = null; } toast('پیشنهاد مساوی رد شد', 'error'); },
     'game:error': ({ error }) => toast(error, 'error'),
     'game:over': (data) => { state = data.state; status = 'finished'; if (data.clock) setClock({ ...data.clock, running: false }); syncRenderer(); showGameOver(data); },
   };
@@ -498,6 +517,8 @@ export function GameView(roomId) {
 
   function showGameOver(data) {
     if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
+    if (drawWaitModal) { drawWaitModal.close(); drawWaitModal = null; }
+    if (drawRecvModal) { drawRecvModal.close(); drawRecvModal = null; }
     const iWon = data.winner === seat || (config?.teams && data.winner != null && data.winner % 2 === seat % 2);
     let title, headline;
     if (data.draw) { title = '🤝 مساوی'; headline = drawReasonText(data.reason); }

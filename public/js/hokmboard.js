@@ -95,16 +95,23 @@ export class HokmRenderer {
       this.holdUntil = 0;
     }
 
-    // Queue card-flight animation for the newly played card
-    if (prev && state) this._detectAndQueueFlight(prev, state);
+    // Queue card-flight animation for the newly played card. If that card is
+    // of the trump (حکم) suit, jolt the table — a "بُر" feels weighty.
+    if (prev && state) {
+      const played = this._detectAndQueueFlight(prev, state);
+      if (played && state.trump != null && played.card.s === state.trump) {
+        this._trumpShakeStart = ts();
+      }
+    }
 
     this._ensureAnim();
     this.draw();
   }
 
-  /** Compare previous vs new state and launch a flying-card animation if a card was just played. */
+  /** Compare previous vs new state, launch a flying-card animation if a card
+   *  was just played, and return that played entry ({seat,card}) or null. */
   _detectAndQueueFlight(prev, state) {
-    if (!prev.trick || !state) return;
+    if (!prev.trick || !state) return null;
     const S  = this.css;
     const CW = S * 0.10, CH = CW * 1.40;
     const place = this._placement(state);
@@ -118,7 +125,7 @@ export class HokmRenderer {
       // Trick just resolved — the last card in lastTrick completed it
       newEntry = state.lastTrick?.[state.lastTrick.length - 1];
     }
-    if (!newEntry) return;
+    if (!newEntry) return null;
 
     const where = place[newEntry.seat];
     const from  = this._seatPos(where, S, CH);
@@ -126,6 +133,7 @@ export class HokmRenderer {
     // Random starting tilt so the card looks naturally tossed
     const startAngle = (Math.random() - 0.5) * 0.45;
     this._flyingCards.push({ card: newEntry.card, seat: newEntry.seat, from, to, startAngle, startTs: ts(), dur: FLY_DUR });
+    return newEntry;
   }
 
   /** Screen-centre of where a seat's cards live (for fly-from). */

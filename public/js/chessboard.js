@@ -109,6 +109,31 @@ export class ChessBoardRenderer {
     this.css = size;
     this.draw();
   }
+  /** Tiny file/rank labels in the corners of the edge squares (8×8 only). */
+  _drawCoords(ctx, theme, N, cell) {
+    const fs = Math.max(8, cell * 0.2);
+    ctx.save();
+    ctx.font = `700 ${fs}px ui-sans-serif, system-ui, sans-serif`;
+    const pad = cell * 0.06;
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const { sr, sc } = this._toScreen(r, c);
+      if (sr !== N - 1 && sc !== 0) continue; // only bottom row & left column
+      const { x, y } = this._cellXY(sr, sc);
+      const isLight = (r + c) % 2 === 0;
+      ctx.fillStyle = isLight ? theme.dark : theme.light;
+      ctx.globalAlpha = 0.9;
+      if (sc === 0) { // rank number, top-left
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText(String(8 - r), x + pad, y + pad);
+      }
+      if (sr === N - 1) { // file letter, bottom-right
+        ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+        ctx.fillText(String.fromCharCode(97 + c), x + cell - pad, y + cell - pad);
+      }
+    }
+    ctx.restore();
+  }
+
   _metrics() {
     const N = this.state?.rows || 8;
     const S = this.css;
@@ -255,6 +280,11 @@ export class ChessBoardRenderer {
       ctx.fillStyle = (r + c) % 2 === 0 ? theme.light : theme.dark;
       ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
     }
+
+    // Board coordinates (files a–h, ranks 1–8) — only on the standard 8×8 board.
+    // Drawn lichess-style inside the edge squares: small, tucked in the corner,
+    // coloured to contrast with the square underneath.
+    if (N === 8 && cols === 8) this._drawCoords(ctx, theme, N, cell);
 
     // Last-move highlight
     if (this.state.lastMove) {

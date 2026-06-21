@@ -161,12 +161,25 @@ export function registerSocket(io, manager) {
       if (!room || room.status !== 'active' || room.numPlayers !== 2) return cb?.({ ok: false });
       const seat = room.seatOf(socket.id);
       if (seat < 0) return cb?.({ ok: false });
+      // No spamming: only one outstanding offer at a time.
+      if (room.drawOfferBy != null) return cb?.({ ok: false, error: 'یک پیشنهاد مساوی در جریان است' });
       room.drawOfferBy = seat;
       const other = 1 - seat;
       const target = room.players[other];
       if (target?.socketId) {
         io.to(target.socketId).emit('game:drawOffer', { from: seat, name: socket.data.identity.name });
       }
+      cb?.({ ok: true });
+    });
+    socket.on('game:drawCancel', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room) return cb?.({ ok: false });
+      const seat = room.seatOf(socket.id);
+      // Only the player who made the offer can withdraw it.
+      if (seat < 0 || room.drawOfferBy !== seat) return cb?.({ ok: false });
+      room.drawOfferBy = null;
+      const other = room.players[1 - seat];
+      if (other?.socketId) io.to(other.socketId).emit('game:drawCancelled');
       cb?.({ ok: true });
     });
     socket.on('game:drawRespond', ({ accept } = {}, cb) => {
