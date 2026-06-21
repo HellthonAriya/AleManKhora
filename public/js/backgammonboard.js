@@ -8,6 +8,7 @@
    move and hits fly to the bar. Emits { type:'move', from, to }.
    ========================================================================= */
 import { BackgammonGame } from './backgammon.js';
+import { tableTheme } from './boardthemes.js';
 
 const FELT = '#16321f', FELT2 = '#0f2417', FRAME = '#5a3a1c', FRAME2 = '#73491f';
 const POINT_A = '#d9b572', POINT_B = '#8a4f28', BAR = '#3a2614';
@@ -285,8 +286,9 @@ export class BackgammonRenderer {
     const fr = ctx.createLinearGradient(0, 0, 0, g.S);
     fr.addColorStop(0, FRAME2); fr.addColorStop(1, FRAME);
     this._roundRect(0, 0, g.S, g.S, 16); ctx.fillStyle = fr; ctx.fill();
+    const th = tableTheme(this.config.boardTheme);
     const fg = ctx.createLinearGradient(0, g.m, 0, g.m + g.fieldH);
-    fg.addColorStop(0, FELT); fg.addColorStop(0.5, FELT2); fg.addColorStop(1, FELT);
+    fg.addColorStop(0, th.felt); fg.addColorStop(0.5, th.edge); fg.addColorStop(1, th.felt);
     ctx.fillStyle = fg; ctx.fillRect(g.m, g.m, g.S - 2 * g.m, g.fieldH);
     // Bar + off tray
     ctx.fillStyle = BAR; ctx.fillRect(g.barX, g.m, g.barW, g.fieldH);

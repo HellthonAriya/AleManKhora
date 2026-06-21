@@ -180,6 +180,11 @@ async function boot() {
   } catch { /* offline */ }
 
   await refreshMe().catch(() => renderNav());
+  // Guests: restore their last-picked page theme (logged-in users get theirs
+  // from prefs inside refreshMe).
+  if (!store.isLoggedIn) {
+    try { const t = localStorage.getItem('theme'); if (t) applyTheme(t); } catch {}
+  }
   // pre-connect socket if identified
   if (store.me) getSocket();
   router();

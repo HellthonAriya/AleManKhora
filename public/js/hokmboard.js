@@ -2,6 +2,7 @@
    اَلِ من خورا — Hokm (حکم) card-table renderer  (v4)
    ========================================================================= */
 import { HokmGame } from './hokm.js';
+import { tableTheme } from './boardthemes.js';
 
 const SUIT       = ['♠', '♥', '♦', '♣'];
 const SUIT_NAME  = ['پیک', 'دل', 'خشت', 'گشنیز'];
@@ -278,8 +279,9 @@ export class HokmRenderer {
     // Table background — overscan by OVER px so the shake never reveals the
     // transparent page behind the felt at the edges.
     const OVER = 18;
-    this._rr(-OVER, -OVER, S + OVER * 2, S + OVER * 2, 16); ctx.fillStyle = FELT_EDGE; ctx.fill();
-    this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.47); ctx.fillStyle = FELT; ctx.fill();
+    const th = tableTheme(this.config.boardTheme);
+    this._rr(-OVER, -OVER, S + OVER * 2, S + OVER * 2, 16); ctx.fillStyle = th.edge; ctx.fill();
+    this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.47); ctx.fillStyle = th.felt; ctx.fill();
 
     this.hand = []; this.trumpBtns = [];
     if (!this.state) { ctx.restore(); return; }

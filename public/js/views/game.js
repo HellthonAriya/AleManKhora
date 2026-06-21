@@ -1,6 +1,7 @@
 /* اَلِ من خورا — In-game view (real-time room): Quoridor or Chess (2/4-player),
    chess clock, spectating, chat, invites, resign, draw offers, rematch, voice. */
-import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock, copyText } from '../core.js';
+import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock, copyText, applyTheme, THEMES, api } from '../core.js';
+import { TABLE_THEMES } from '../boardthemes.js';
 import { BoardRenderer } from '../board.js';
 import { ChessBoardRenderer } from '../chessboard.js';
 import { GridRenderer } from '../gridboard.js';
@@ -16,6 +17,8 @@ const SEAT_LABELS = ['۱', '۲', '۳', '۴'];
 const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const PIECE_FA = { p: 'سرباز', n: 'اسب', b: 'فیل', r: 'رخ', q: 'وزیر', k: 'شاه' };
 const TEAM_NAMES = ['تیم قرمز/زرد', 'تیم آبی/سبز'];
+// Games whose felt/table can be re-themed in-game (chess/quoridor have their own).
+const BOARD_THEME_GAMES = ['backgammon', 'hokm', 'pasur'];
 
 export function GameView(roomId) {
   const socket = getSocket();
@@ -385,9 +388,7 @@ export function GameView(roomId) {
         h('div', { class: 'card-title' }, '👁 حالت تماشاگر'),
         h('p', { class: 'card-sub', style: 'margin:0' }, 'تو در حال تماشای زندهٔ این بازی هستی.'),
         h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:12px', onclick: () => navigate('/lobby') }, 'بازگشت به سالن')));
-      return;
-    }
-    if (status === 'waiting') {
+    } else if (status === 'waiting') {
       const inviteBox = code ? h('div', { class: 'card' },
         h('div', { class: 'card-title' }, '🔗 دعوت دوست'),
         h('p', { class: 'card-sub' }, numPlayers === 4 ? 'این کد را برای ۳ نفر دیگر بفرست:' : 'این کد یا لینک را برای حریفت بفرست:'),
@@ -398,9 +399,7 @@ export function GameView(roomId) {
         h('p', { class: 'faint', style: 'margin-top:10px' }, `${faNum(players.filter(Boolean).length)} از ${faNum(numPlayers)} بازیکن آماده`),
       ) : h('div', { class: 'card' }, h('p', { class: 'muted' }, 'در انتظار حریف…'));
       controlsMount.append(inviteBox);
-      return;
-    }
-    if (status === 'active') {
+    } else if (status === 'active') {
       const card = h('div', { class: 'card' },
         h('div', { class: 'card-title' }, 'کنترل نوبت'),
         h('p', { class: 'hint-line', style: 'margin-bottom:10px' }, hintFor()),
@@ -412,6 +411,58 @@ export function GameView(roomId) {
       card.append(h('button', { class: 'btn btn-danger btn-sm btn-block', style: 'margin-top:10px', onclick: doResign }, '🏳 تسلیم'));
       controlsMount.append(card);
     }
+    controlsMount.append(appearanceCard());
+  }
+
+  /* ----- In-game appearance: page theme (all games) + board theme ----- */
+  function setPageTheme(id) {
+    applyTheme(id);
+    if (store.me) {
+      const prefs = { ...(store.me.prefs || {}), theme: id };
+      store.set({ me: { ...store.me, prefs } });
+      api('/profile', { method: 'PATCH', body: { prefs } }).catch(() => {});
+    } else {
+      try { localStorage.setItem('theme', id); } catch {}
+    }
+  }
+  function appearanceCard() {
+    const card = h('div', { class: 'card', style: 'margin-top:14px' }, h('div', { class: 'card-title' }, '🎨 ظاهر'));
+    const cur = document.body.dataset.theme;
+    const row = h('div', { class: 'theme-row' });
+    THEMES.forEach((t) => {
+      const chip = h('div', {
+        class: 'theme-chip' + (t.id === cur ? ' active' : ''), title: t.name,
+        style: `background:linear-gradient(135deg, ${t.from}, ${t.to})`,
+        onclick: () => { setPageTheme(t.id); [...row.children].forEach((c, i) => c.classList.toggle('active', THEMES[i].id === t.id)); },
+      });
+      row.append(chip);
+    });
+    card.append(h('div', { class: 'opt-group' }, h('label', {}, 'تم صفحه'), row));
+    const bt = boardThemeSelector();
+    if (bt) card.append(bt);
+    return card;
+  }
+  function boardThemeSelector() {
+    let opts, cur, apply;
+    if (isChess) {
+      opts = [['classic', 'کلاسیک'], ['green', 'سبز'], ['blue', 'آبی'], ['wood', 'چوب'], ['gray', 'خاکستری'], ['midnight', 'نیمه‌شب']];
+      cur = config?.boardTheme || 'classic';
+      apply = (v) => { config.boardTheme = v; renderer?.setConfig({ boardTheme: v }); };
+    } else if (gameType === 'quoridor') {
+      opts = THEMES.map((t) => [t.id, t.name]);
+      cur = config?.theme || 'emerald';
+      apply = (v) => { config.theme = v; renderer?.setConfig({ theme: v }); };
+    } else if (BOARD_THEME_GAMES.includes(gameType)) {
+      opts = TABLE_THEMES.map((t) => [t.id, t.name]);
+      cur = config?.boardTheme || 'classic';
+      apply = (v) => { config.boardTheme = v; renderer?.setConfig({ boardTheme: v }); };
+    } else return null;
+    const seg = h('div', { class: 'seg seg-wrap', style: 'flex-wrap:wrap;gap:6px' });
+    opts.forEach(([v, label]) => {
+      const b = h('button', { class: v === cur ? 'active' : '', onclick: () => { apply(v); [...seg.children].forEach((x) => x.classList.toggle('active', x === b)); } }, label);
+      seg.append(b);
+    });
+    return h('div', { class: 'opt-group', style: 'margin-top:8px' }, h('label', {}, 'تم تخته/میز'), seg);
   }
 
   /* ========================= Chess clock ========================= */

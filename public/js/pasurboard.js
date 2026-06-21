@@ -12,6 +12,7 @@
    interface (setConfig/setMySeat/setState/setInteractive/destroy).
    ========================================================================= */
 import { PasurGame, fishValue, subsetsSummingTo } from './pasur.js';
+import { tableTheme } from './boardthemes.js';
 
 const SUIT       = ['♠', '♥', '♦', '♣'];
 const SUIT_COLOR = ['#14161e', '#c8202e', '#c8202e', '#14161e'];
@@ -208,8 +209,9 @@ export class PasurRenderer {
     ctx.save();
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     ctx.clearRect(0, 0, S, S);
-    this._rr(0, 0, S, S, 16); ctx.fillStyle = FELT_EDGE; ctx.fill();
-    this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.06); ctx.fillStyle = FELT; ctx.fill();
+    const th = tableTheme(this.config.boardTheme);
+    this._rr(0, 0, S, S, 16); ctx.fillStyle = th.edge; ctx.fill();
+    this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.06); ctx.fillStyle = th.felt; ctx.fill();
 
     this.hand = []; this.tableRects = []; this.buttons = [];
     if (!this.state) { ctx.restore(); return; }
