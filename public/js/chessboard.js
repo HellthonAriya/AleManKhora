@@ -38,6 +38,7 @@ export class ChessBoardRenderer {
     this.hover = null;      // {sr,sc} screen-grid hover
     this.promo = null;      // {from,to,options:[{t,rect}]}
     this.anim = null;       // {seat, t, from, to, t0, dur}
+    this._captures = [];    // flying captured pieces with a particle burst
 
     this._dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     this._bind();
@@ -71,6 +72,17 @@ export class ChessBoardRenderer {
       const to = state.lastMove.to;
       const piece = state.board[to.r * state.cols + to.c];
       if (piece) this.anim = { seat: piece.seat, from: { ...state.lastMove.from }, to: { ...to }, t0: performance.now(), dur: 240 };
+      // Capture? The piece that was on `to` (or an en-passant pawn) is captured.
+      const cols = state.cols;
+      const victim = prev.board[to.r * cols + to.c];
+      const mover = state.board[to.r * cols + to.c];
+      if (victim && mover && victim.seat !== mover.seat) {
+        this._spawnCapture(victim, to.r, to.c);
+      } else if (mover && mover.t === 'p' && state.lastMove.from.c !== to.c && !victim) {
+        const epr = state.lastMove.from.r;
+        const ep = prev.board[epr * cols + to.c];
+        if (ep && ep.seat !== mover.seat) this._spawnCapture(ep, epr, to.c);
+      }
     }
     this._loop();
   }
@@ -249,10 +261,66 @@ export class ChessBoardRenderer {
       if (this.anim) {
         if (now - this.anim.t0 < this.anim.dur) active = true; else this.anim = null;
       }
+      if (this._captures.length) {
+        this._captures = this._captures.filter((c) => now - c.t0 < c.dur);
+        if (this._captures.length) active = true;
+      }
       this.draw();
       this._raf = active ? requestAnimationFrame(tick) : null;
     };
     tick();
+  }
+
+  /** Spawn a capture fly-out. The stronger the captured piece, the bigger and
+   *  flashier the burst (pawn = white spark; queen = golden shockwave). */
+  _spawnCapture(piece, r, c) {
+    const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 3 };
+    const val = VAL[piece.t] || 1;
+    const color = val >= 9 ? '#ffd76b' : val >= 5 ? '#ff9d4d' : val >= 3 ? '#46d6ff' : '#ffffff';
+    const n = 6 + val * 3;
+    const parts = [];
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 0.7 + Math.random() * (1 + val * 0.25);
+      parts.push({ a, sp, rr: 1.5 + Math.random() * 2.5 });
+    }
+    this._captures.push({ piece, r, c, t0: performance.now(), dur: 460 + val * 45, val, color, parts });
+  }
+
+  _drawCaptures(ctx, cell) {
+    const now = performance.now();
+    for (const cap of this._captures) {
+      const t = Math.min(1, (now - cap.t0) / cap.dur);
+      const ease = 1 - Math.pow(1 - t, 3);
+      const { sr, sc } = this._toScreen(cap.r, cap.c);
+      const { x, y } = this._cellXY(sr, sc);
+      const cx = x + cell / 2, cy = y + cell / 2;
+      // expanding shockwave ring
+      ctx.save();
+      ctx.globalAlpha = (1 - t) * 0.8;
+      ctx.strokeStyle = cap.color; ctx.lineWidth = (1 - ease) * 4 + 1;
+      ctx.shadowColor = cap.color; ctx.shadowBlur = 16 * (1 - t);
+      ctx.beginPath(); ctx.arc(cx, cy, cell * (0.2 + ease * (0.4 + cap.val * 0.05)), 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      // particles flying out
+      ctx.save();
+      ctx.shadowColor = cap.color; ctx.shadowBlur = 8;
+      ctx.fillStyle = cap.color;
+      for (const p of cap.parts) {
+        const d = ease * cell * (0.5 + p.sp * 0.5);
+        ctx.globalAlpha = Math.max(0, 1 - t);
+        ctx.beginPath(); ctx.arc(cx + Math.cos(p.a) * d, cy + Math.sin(p.a) * d, p.rr * (1 - t), 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+      // the captured piece itself: scales up, spins, fades
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - ease);
+      ctx.translate(cx, cy);
+      ctx.rotate(ease * (cap.val >= 5 ? 0.9 : 0.5));
+      ctx.scale(1 + ease * 0.6, 1 + ease * 0.6);
+      this._drawPiece(cap.piece, 0, 0, cell);
+      ctx.restore();
+    }
   }
 
   draw() {
@@ -346,6 +414,8 @@ export class ChessBoardRenderer {
       const p = this.state.board[this.anim.to.r * cols + this.anim.to.c];
       if (p) this._drawPiece(p, cx, cy, cell);
     }
+    // Capture fly-out bursts (drawn over pieces)
+    if (this._captures.length) this._drawCaptures(ctx, cell);
 
     // Legal target markers
     if (this.sel && this._myTurn()) {

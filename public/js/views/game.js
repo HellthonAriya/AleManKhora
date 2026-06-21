@@ -289,6 +289,24 @@ export function GameView(roomId) {
     return v;
   }
 
+  /** The pieces seat `s` has captured from the opponent (their missing men),
+   *  shown as glyphs in the opponent's colour. 2-player standard board only. */
+  function capturedRow(s) {
+    if (!isChess || numPlayers !== 2 || !state?.board || state.cols !== 8) return null;
+    const start = { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 };
+    const opp = 1 - s;
+    const have = { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 };
+    for (const pc of state.board) if (pc && pc.seat === opp) have[pc.t] = (have[pc.t] || 0) + 1;
+    const GLY = { q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+    const row = h('div', { class: 'cap-row', style: 'display:flex;gap:1px;flex-wrap:wrap;font-size:1.05rem;line-height:1;margin-top:4px;min-height:1.05rem' });
+    let any = false;
+    for (const t of ['q', 'r', 'b', 'n', 'p']) {
+      const n = (start[t] || 0) - (have[t] || 0);
+      for (let i = 0; i < n; i++) { any = true; row.append(h('span', { style: `color:${seatColor(opp)}` }, GLY[t])); }
+    }
+    return any ? row : null;
+  }
+
   /** Per-seat status line for the simple board games. */
   function simpleDetail(s) {
     const wrap = (txt) => h('div', {}, h('div', { class: 'pc-walls' }, txt));
@@ -353,8 +371,10 @@ export function GameView(roomId) {
       let detail;
       if (isChess) {
         const mat = chessMaterial(s);
+        const capRow = capturedRow(s);
         detail = h('div', {},
           h('div', { class: 'pc-walls' }, `♟ ارزش: ${faNum(mat)}`),
+          capRow,
           inChk ? h('span', { class: 'badge badge-check' }, 'کیش') : null,
           config.teams ? h('span', { class: 'faint', style: 'margin-inline-start:6px' }, TEAM_NAMES[s % 2]) : null,
         );
