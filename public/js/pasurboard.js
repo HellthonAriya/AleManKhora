@@ -217,12 +217,33 @@ export class PasurRenderer {
     const oppSeat = 1 - this.mySeat;
 
     this._drawInfoBar(ctx, S, st);
+    this._drawCapturePiles(ctx, S, st, oppSeat);
     this._drawOpponent(ctx, S, st, oppSeat);
     this._drawTable(ctx, S, st);
     this._drawMyHand(ctx, S, st);
     this._drawControls(ctx, S, st);
 
     ctx.restore();
+  }
+
+  /** Physical "won" piles down the left margin that visibly grow as you
+   *  collect برگ — opponent's near the top, yours lower down. */
+  _drawCapturePiles(ctx, S, st, oppSeat) {
+    this._capturePile(ctx, S, S * 0.045, S * 0.16, st.capturedCounts?.[oppSeat] ?? 0, this._seatColor(oppSeat), 'حریف');
+    this._capturePile(ctx, S, S * 0.045, S * 0.50, st.capturedCounts?.[this.mySeat] ?? 0, this._seatColor(this.mySeat), 'تو');
+  }
+  _capturePile(ctx, S, x, y0, count, accent, label) {
+    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = `bold ${S * 0.023}px sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`${label}: ${fa(count)}`, x, y0 - S * 0.006);
+    if (!count) return;
+    const cw = S * 0.052, ch = cw * 1.42;
+    const bandH = S * 0.26;
+    const shown = Math.min(count, 30);
+    const step = shown > 1 ? Math.min(ch * 0.16, (bandH - ch) / (shown - 1)) : 0;
+    for (let i = 0; i < shown; i++) {
+      this._cardBack(ctx, x + (i % 2) * 1.5, y0 + i * step, cw, ch, accent);
+    }
   }
 
   _drawInfoBar(ctx, S, st) {
