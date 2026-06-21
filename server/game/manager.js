@@ -63,7 +63,7 @@ const TIME_INCREMENTS = [0, 2, 3, 5, 10];             // seconds added per move
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 // How long a disconnected player has to reconnect before being eliminated.
-const RECONNECT_GRACE_MS = 2 * 60 * 1000; // 2 minutes
+const RECONNECT_GRACE_MS = 3 * 60 * 1000; // 3 minutes
 
 const CHESS_BOARD_THEMES = ['classic', 'green', 'blue', 'wood', 'gray', 'midnight'];
 const CHESS_COLORS_2 = ['#f3f1ea', '#2b2b30'];
@@ -379,6 +379,7 @@ export class GameManager {
 
   startClock(room) {
     if (!room.clock.enabled) return;
+    room.clock.paused = false;
     room.clock.turnStart = Date.now();
     this.scheduleFlag(room);
     this.broadcast(room, 'game:clock', room.clockView());
@@ -672,10 +673,13 @@ export class GameManager {
       room.players[seat].connected = false;
       this.broadcast(room, 'player:disconnect', { seat });
       if (room.status === 'active') {
-        // Pause the idle timer while the player is away — they can't move
-        // when disconnected; resume it on reconnect.
+        // Pause the idle timer AND the chess clock while the player is away —
+        // it's unfair to flag or time-out someone who can't move. Both resume
+        // on reconnect.
         if (room.game.turn === seat && !room.game.eliminated[seat]) {
           this.clearIdleTimer(room);
+          if (room.clock.timer) { clearTimeout(room.clock.timer); room.clock.timer = null; }
+          room.clock.paused = true;
         }
         setTimeout(() => {
           const r = this.rooms.get(roomId);
@@ -706,10 +710,16 @@ export class GameManager {
     socket.data.roomId = room.id;
     socket.data.seat = seat;
     this.broadcast(room, 'player:reconnect', { seat });
-    // Resume idle timer if it's their turn (was paused on disconnect).
+    // Resume idle timer + clock if it's their turn (both paused on disconnect).
     if (room.status === 'active' && !room.game.isOver() &&
         room.game.turn === seat && !room.game.eliminated[seat]) {
       this.resetIdleTimer(room);
+      if (room.clock.paused) {
+        room.clock.paused = false;
+        room.clock.turnStart = Date.now(); // don't charge the away time
+        this.scheduleFlag(room);
+        this.broadcast(room, 'game:clock', room.clockView());
+      }
     }
   }
 

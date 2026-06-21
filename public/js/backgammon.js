@@ -322,15 +322,32 @@ export class BackgammonGame {
     this._autoSkipIfStuck();
   }
 
-  /** If the current seat has no legal move, clear dice and pass (bounded loop). */
+  /** If the current seat has no legal move, clear dice and pass. Keeps bouncing
+   *  (re-rolling) until someone can move — both players being stuck on the bar
+   *  with their entry points blocked is temporary, since the dice re-roll each
+   *  pass. A genuine mutual close-out (astronomically rare) is resolved by pip
+   *  count so the board can never freeze. */
   _autoSkipIfStuck() {
     let guard = 0;
-    while (guard < 4 && !this.isOver() && this.legalMoves(this.turn).length === 0) {
+    while (guard++ < 60 && !this.isOver() && this.legalMoves(this.turn).length === 0) {
       this.turn = other(this.turn);
       const r = rollDice();
       this.rolled = r.rolled;
       this.dice = r.dice;
-      guard++;
+    }
+    if (!this.isOver() && this.legalMoves(this.turn).length === 0) {
+      // True deadlock — end by pip count (fewer pips = closer to home = winner).
+      const pip = (seat) => {
+        let t = this.bar[seat] * 25;
+        for (let i = 0; i < NUM_POINTS; i++) {
+          const p = this.points[i];
+          if (p.seat === seat) t += p.count * (seat === 0 ? i + 1 : 24 - i);
+        }
+        return t;
+      };
+      this.winner = pip(0) <= pip(1) ? 0 : 1;
+      this.endReason = 'deadlock';
+      this.dice = [];
     }
   }
 

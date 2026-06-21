@@ -46,9 +46,13 @@ export class BackgammonRenderer {
     this._resize();
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
+    // Returning to a backgrounded tab pauses rAF mid-animation; redraw fresh.
+    this._onVis = () => { if (document.visibilityState === 'visible') { this._anim = null; this._hitAnim = null; this._ensureAnim(); this.draw(); } };
+    document.addEventListener('visibilitychange', this._onVis);
   }
   destroy() {
     window.removeEventListener('resize', this._onResize);
+    document.removeEventListener('visibilitychange', this._onVis);
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
   }
 
@@ -61,7 +65,9 @@ export class BackgammonRenderer {
     this.state = state;
     this._clearSel();
 
-    // Detect & animate the move that produced this state.
+    // Detect & animate the move that produced this state. Always drop any
+    // previous in-flight animation first so a resync can't leave one frozen.
+    this._anim = null; this._hitAnim = null;
     const mv = this._detectMove(prev, state);
     if (mv) {
       this._anim = { ...mv, t0: now() };
@@ -336,9 +342,16 @@ export class BackgammonRenderer {
       if (this._anim && this._anim.to === i) count -= 1; // the in-flight checker
       if (count > 0) this._stack(ctx, this._slot(i), p.seat, count, g, this.sel === i);
     }
-    // Bar checkers
-    if (st.bar[0]) this._stack(ctx, this._barSlot(0, g), 0, st.bar[0] - (this._anim && this._anim.from === 'bar' ? 1 : 0), g, this.sel === 'bar');
-    if (st.bar[1]) this._stack(ctx, this._barSlot(1, g), 1, st.bar[1] - (this._anim && this._anim.from === 'bar' && this.mySeat === 1 ? 1 : 0), g, false);
+    // Bar checkers — hide the one that's currently flying out (entering) or
+    // flying in (just hit) so it isn't drawn twice.
+    const barShown = (seat) => {
+      let n = st.bar[seat] || 0;
+      if (this._anim && this._anim.from === 'bar' && this._anim.seat === seat) n -= 1;
+      if (this._hitAnim && this._hitAnim.seat === seat) n -= 1;
+      return Math.max(0, n);
+    };
+    if (barShown(0)) this._stack(ctx, this._barSlot(0, g), 0, barShown(0), g, this.sel === 'bar' && this.mySeat === 0);
+    if (barShown(1)) this._stack(ctx, this._barSlot(1, g), 1, barShown(1), g, this.sel === 'bar' && this.mySeat === 1);
 
     // Off tray
     this._offCount(ctx, g, 0, st.off[0]);
@@ -574,13 +587,21 @@ export class BackgammonRenderer {
     if (!prev || !next) return null;
     const seat = prev.turn;
     const sc = (st, i) => { const p = st.points[i]; return p && p.seat === seat ? p.count : 0; };
-    let from = null, to = null;
-    if ((next.bar[seat] ?? 0) < (prev.bar[seat] ?? 0)) from = 'bar';
-    else for (let i = 0; i < 24; i++) if (sc(next, i) < sc(prev, i)) { from = i; break; }
-    if ((next.off[seat] ?? 0) > (prev.off[seat] ?? 0)) to = 'off';
-    else for (let i = 0; i < 24; i++) if (sc(next, i) > sc(prev, i)) { to = i; break; }
-    if (from == null || to == null) return null;
-    // Hit? opponent's bar grew.
+    // Only animate a CLEAN single move: exactly one of the mover's checkers left
+    // a slot and exactly one arrived. Anything else (a multi-move resync after
+    // backgrounding/reconnecting) renders without animation, so a stale or bogus
+    // slide never plays.
+    let leaving = 0, arriving = 0, from = null, to = null;
+    const barDec = Math.max(0, (prev.bar[seat] ?? 0) - (next.bar[seat] ?? 0));
+    if (barDec) { leaving += barDec; from = 'bar'; }
+    const offInc = Math.max(0, (next.off[seat] ?? 0) - (prev.off[seat] ?? 0));
+    if (offInc) { arriving += offInc; to = 'off'; }
+    for (let i = 0; i < 24; i++) {
+      const d = sc(prev, i) - sc(next, i);
+      if (d > 0) { leaving += d; if (from == null) from = i; }
+      else if (d < 0) { arriving += -d; if (to == null) to = i; }
+    }
+    if (leaving !== 1 || arriving !== 1 || from == null || to == null) return null;
     const opp = seat === 0 ? 1 : 0;
     const hit = (next.bar[opp] ?? 0) > (prev.bar[opp] ?? 0) ? true : null;
     return { seat, from, to, hit, hitSeat: opp };
