@@ -14,6 +14,12 @@ import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
 
 const SEAT_LABELS = ['۱', '۲', '۳', '۴'];
+const GAME_NAMES = {
+  quoridor: '🧱 اَلِ من خورا', chess: '♛ شطرنج', chess4: '♞ شطرنج ۴ نفره',
+  chesszade: '🔀 شطرنج زاده‌ای', hokm: '🃏 حکم', pasur: '🎴 پاسور',
+  backgammon: '🎲 تخته‌نرد', othello: '⚫ اوتلو', gomoku: '⬤ گوموکو',
+  dots: '▦ نقطه‌خط', tictactoe: '✕ دوز',
+};
 const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const PIECE_FA = { p: 'سرباز', n: 'اسب', b: 'فیل', r: 'رخ', q: 'وزیر', k: 'شاه' };
 const TEAM_NAMES = ['تیم قرمز/زرد', 'تیم آبی/سبز'];
@@ -38,6 +44,8 @@ export function GameView(roomId) {
   let gameType = 'quoridor';
   let isChess = false;
   let rematchPending = false; // true after we vote for a rematch, until it starts
+  let series = null;          // multi-game league state (null for single games)
+  let seriesPending = false;  // true after we vote ready for the next series game
   let overModalHandle = null; // handle to the open game-over popup, if any
   let drawWaitModal = null;   // our "waiting for opponent" draw popup (offerer side)
   let drawRecvModal = null;   // the incoming draw-offer popup (receiver side)
@@ -54,6 +62,7 @@ export function GameView(roomId) {
   const chatLog = h('div', { class: 'chat-log' });
   const sideTop = h('div', { class: 'game-side' });
   const sideBottom = h('div', { class: 'game-side' });
+  const seriesMount = h('div', {});
   const clockEls = {};
 
   let renderer = null;
@@ -246,7 +255,35 @@ export function GameView(roomId) {
     updateBanner(myTurn);
     renderPlayerCards();
     renderControls();
+    renderSeriesPanel();
     updateWallTray();
+  }
+
+  /** Compact league scoreboard shown in the sidebar throughout a series. */
+  function renderSeriesPanel() {
+    clear(seriesMount);
+    if (!series) return;
+    const card = h('div', { class: 'card series-card' },
+      h('div', { class: 'card-title' }, `🏆 لیگ — بازی ${faNum(series.index + 1)} از ${faNum(series.total)}`));
+    // playlist progress
+    const list = h('div', { class: 'series-games' });
+    series.games.forEach((g, i) => {
+      const cls = i < series.index || (series.done) ? 'done' : i === series.index ? 'current' : '';
+      list.append(h('span', { class: 'series-chip ' + cls }, GAME_NAMES[g] || g));
+    });
+    card.append(list);
+    // scoreboard, ranked
+    const order = players.map((p, s) => ({ s, p })).filter((x) => x.p)
+      .sort((a, b) => (series.scores[b.s] || 0) - (series.scores[a.s] || 0));
+    const board = h('div', { class: 'series-scores' });
+    order.forEach(({ s, p }) => {
+      board.append(h('div', { class: 'series-score-row' + (s === seat ? ' me' : '') },
+        h('span', { class: 'dotc', style: `background:${seatColor(s)}` }),
+        h('span', { class: 'series-name' }, p.name, p.isAI ? ' 🤖' : ''),
+        h('span', { class: 'series-pts' }, faNum(series.scores[s] ?? 0))));
+    });
+    card.append(board);
+    seriesMount.append(card);
   }
 
   function gameIsOver() {
@@ -653,6 +690,7 @@ export function GameView(roomId) {
     config = v.config; state = v.state; players = v.players;
     numPlayers = v.numPlayers || v.players?.length || 2;
     aiSeats = v.aiSeats || []; status = v.status; code = v.code;
+    if (v.series !== undefined) series = v.series;
     gameType = v.gameType || config?.gameType || 'quoridor';
     isChess = gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade';
     if (v.clock) setClock(v.clock);
@@ -660,7 +698,14 @@ export function GameView(roomId) {
   }
 
   const handlers = {
-    'game:start': (v) => { rematchPending = false; if (overModalHandle) { overModalHandle.close(); overModalHandle = null; } applyView(v); toast('بازی شروع شد! موفق باشی', 'success'); },
+    'game:start': (v) => {
+      rematchPending = false; seriesPending = false;
+      if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
+      applyView(v);
+      const msg = v.series ? `بازی ${faNum((v.series.index ?? 0) + 1)}: ${GAME_NAMES[v.gameType] || v.gameType}` : 'بازی شروع شد! موفق باشی';
+      toast(msg, 'success');
+    },
+    'series:ready': ({ votes }) => toast(`آمادهٔ بازی بعد (${faNum(votes.length)})`),
     'room:update': (v) => applyView(v),
     'game:update': ({ state: s }) => { state = s; syncRenderer(); },
     'game:clock': (cv) => { setClock(cv); },
@@ -698,7 +743,13 @@ export function GameView(roomId) {
     },
     'game:drawDeclined': () => { if (drawWaitModal) { drawWaitModal.close(); drawWaitModal = null; } toast('پیشنهاد مساوی رد شد', 'error'); },
     'game:error': ({ error }) => toast(error, 'error'),
-    'game:over': (data) => { state = data.state; status = 'finished'; if (data.clock) setClock({ ...data.clock, running: false }); syncRenderer(); showGameOver(data); },
+    'game:over': (data) => {
+      state = data.state; status = 'finished';
+      if (data.series !== undefined) series = data.series;
+      if (data.clock) setClock({ ...data.clock, running: false });
+      syncRenderer();
+      if (data.series) showSeriesStandings(data); else showGameOver(data);
+    },
   };
   for (const [ev, fn] of Object.entries(handlers)) socket.on(ev, fn);
 
@@ -766,6 +817,54 @@ export function GameView(roomId) {
     }).catch(() => {});
   }
 
+  /** Between-games (and final) standings popup for a league/series room. */
+  function showSeriesStandings(data) {
+    if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
+    const sv = data.series;
+    const done = sv.done;
+    // This game's headline
+    let gameLine;
+    if (data.draw) gameLine = 'این بازی مساوی شد.';
+    else if (config?.teams && data.winner != null) gameLine = `${TEAM_NAMES[data.winner % 2]} این بازی را برد.`;
+    else gameLine = `${data.winnerName || ('بازیکن ' + SEAT_LABELS[data.winner])} این بازی را برد.`;
+
+    // Ranked scoreboard
+    const order = players.map((p, s) => ({ s, p })).filter((x) => x.p)
+      .sort((a, b) => (sv.scores[b.s] || 0) - (sv.scores[a.s] || 0));
+    const board = h('div', { class: 'series-scores', style: 'margin:12px 0' });
+    order.forEach(({ s, p }, rank) => {
+      board.append(h('div', { class: 'series-score-row' + (s === seat ? ' me' : '') },
+        h('span', {}, done && rank === 0 ? '🥇 ' : `${faNum(rank + 1)}. `),
+        h('span', { class: 'dotc', style: `background:${seatColor(s)}` }),
+        h('span', { class: 'series-name' }, p.name, p.isAI ? ' 🤖' : ''),
+        h('span', { class: 'series-pts' }, faNum(sv.scores[s] ?? 0))));
+    });
+
+    let title, footer;
+    if (done) {
+      const champ = order[0];
+      title = '🏆 پایان لیگ';
+      footer = h('p', { style: 'font-weight:700;color:var(--accent)' },
+        champ?.s === seat ? 'تو قهرمان لیگ شدی! 🎉' : `${champ?.p?.name || '—'} قهرمان لیگ شد.`);
+    } else {
+      title = `پایان بازی ${faNum(sv.index + 1)} از ${faNum(sv.total)}`;
+      const next = sv.games[sv.index + 1];
+      footer = h('p', { class: 'muted' }, `بازی بعد: ${GAME_NAMES[next] || next}`);
+    }
+
+    const actions = [{ label: 'بازگشت به سالن', class: 'btn-ghost', onClick: () => navigate('/lobby') }];
+    if (!done && !spectator) {
+      actions.push({ label: seriesPending ? 'در انتظار بقیه…' : '▶ بازی بعد', class: 'btn-primary',
+        onClick: () => { socket.emit('series:next'); seriesPending = true; return true; } });
+    }
+    overModalHandle = modal({
+      title,
+      body: h('div', { class: 'center' }, h('p', {}, gameLine), board, footer),
+      actions,
+      onClose: () => { overModalHandle = null; },
+    });
+  }
+
   function drawReasonText(reason) {
     return reason === 'stalemate' ? 'پات (بدون حرکت مجاز و بدون کیش).'
       : reason === 'fifty' ? 'قانون ۵۰ حرکت.'
@@ -828,7 +927,7 @@ export function GameView(roomId) {
   rejoinRoom();
 
   /* ========================= Layout ========================= */
-  sideTop.append(playerCardsMount, controlsMount);
+  sideTop.append(seriesMount, playerCardsMount, controlsMount);
   sideBottom.append(
     h('div', { class: 'card' },
       h('div', { class: 'card-title' }, '💬 گفتگو'),

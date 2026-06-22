@@ -303,6 +303,20 @@ input, select, textarea { font-family: inherit; }
   100% { transform: translate(var(--drift, 0), -78%) scale(1); opacity: 0; }
 }
 
+/* League / series */
+.series-games { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
+.series-chip { font-size: .74rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.series-chip.current { border-color: var(--accent); color: var(--accent); font-weight: 700; box-shadow: 0 0 0 1px var(--accent) inset; }
+.series-chip.done { opacity: .55; text-decoration: line-through; }
+.series-scores { display: flex; flex-direction: column; gap: 6px; }
+.series-score-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 9px; background: rgba(255,255,255,.03); }
+.series-score-row.me { background: rgba(19,192,138,.14); }
+.series-score-row .series-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.series-score-row .series-pts { font-weight: 800; color: var(--accent); font-size: 1.05rem; }
+.series-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.series-chosen { display: flex; flex-direction: column; gap: 4px; }
+.series-chosen-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 8px; background: rgba(255,255,255,.04); }
+
 .invite-box { display: flex; gap: 8px; align-items: center; }
 .invite-code { font-size: 1.5rem; font-weight: 800; letter-spacing: 4px; color: var(--accent); }
 

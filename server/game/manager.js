@@ -220,6 +220,7 @@ class Room {
     this.lastActivity = Date.now();
     this.idleTimer = null;
     this.rematchVotes = new Set();
+    this.series = null; // set for multi-game "league" rooms
     // chess clock
     const ms = (config.timeLimit || 0) * 1000;
     this.clock = {
@@ -264,6 +265,20 @@ class Room {
       spectators: this.spectators.size,
       clock: this.clockView(),
       state: this.stateFor(viewerSeat),
+      series: this.seriesView(),
+    };
+  }
+
+  /** Public summary of the series (playlist, progress, scoreboard). */
+  seriesView() {
+    if (!this.series) return null;
+    return {
+      index: this.series.index,
+      total: this.series.configs.length,
+      scores: [...this.series.scores],
+      games: this.series.configs.map((c) => c.gameType),
+      done: !!this.series.done,
+      intermission: !!this.series.intermission,
     };
   }
 
@@ -354,6 +369,82 @@ export class GameManager {
       if (!room.players[s] && this.addBot(room, s, difficulty)) added++;
     }
     return added;
+  }
+
+  /* ------------------------------- Series --------------------------------- */
+
+  // Which games are available for an N-player series.
+  static SERIES_GAMES = {
+    2: ['quoridor', 'chess', 'chesszade', 'hokm', 'pasur', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'],
+    3: ['hokm'],
+    4: ['quoridor', 'chess4', 'hokm'],
+  };
+
+  /** Build a sanitized config for one game in an N-player series. */
+  _seriesConfig(gameType, players, { timeLimit = 0 } = {}) {
+    const base = { gameType, timeLimit, timeIncrement: 0 };
+    if (gameType === 'quoridor') base.players = players;
+    if (gameType === 'hokm') base.variant = String(players);
+    return sanitizeConfig(base);
+  }
+
+  /**
+   * Create a "league" room: a fixed roster plays a playlist of games back to
+   * back, accumulating points. All games share the same player count.
+   */
+  createSeries({ playlist, players, timeLimit }) {
+    const n = [2, 3, 4].includes(parseInt(players, 10)) ? parseInt(players, 10) : 2;
+    const allowed = GameManager.SERIES_GAMES[n];
+    const games = (Array.isArray(playlist) ? playlist : [])
+      .filter((g) => allowed.includes(g)).slice(0, 12);
+    if (games.length < 2) throw new Error('برای یک سری حداقل دو بازی انتخاب کن');
+    const configs = games.map((g) => this._seriesConfig(g, n, { timeLimit }));
+    const room = this.createRoom({ mode: 'series', config: configs[0], code: codeGen() });
+    room.series = {
+      configs, index: 0,
+      scores: new Array(room.numPlayers).fill(0),
+      readyVotes: new Set(),
+    };
+    return room;
+  }
+
+  /** Award series points for a finished game (team-aware). */
+  _scoreSeriesGame(room, { winnerSeat, isDraw }) {
+    const sc = room.series.scores;
+    const teams = !!room.config.teams;
+    const wt = room.game.winningTeam ?? null;
+    if (isDraw || winnerSeat == null) {
+      if (room.numPlayers === 2) { sc[0] += 0.5; sc[1] += 0.5; }
+    } else if (teams && wt != null) {
+      for (let i = 0; i < room.numPlayers; i++) if (i % 2 === wt) sc[i] += 1;
+    } else {
+      sc[winnerSeat] += 1;
+    }
+  }
+
+  /** Advance an intermission series to its next game (all humans ready). */
+  advanceSeries(room) {
+    if (!room.series || room.series.done) return;
+    room.series.index++;
+    room.series.intermission = false;
+    room.series.readyVotes = new Set();
+    const cfg = room.series.configs[room.series.index];
+    room.config = cfg;
+    room.gameType = cfg.gameType;
+    room.game = buildEngine(cfg.gameType, cfg);
+    room.rematchVotes.clear();
+    for (let s = 0; s < room.numPlayers; s++) {
+      if (room.players[s]) room.players[s].color = cfg.colors[s];
+    }
+    room.clock.limitMs = (cfg.timeLimit || 0) * 1000;
+    room.clock.incMs = (cfg.timeIncrement || 0) * 1000;
+    room.clock.enabled = room.clock.limitMs > 0;
+    room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
+    room.status = 'active';
+    this.startClock(room);
+    this.resetIdleTimer(room);
+    this.emitPerSeat(room, 'game:start', (s) => room.publicView(s));
+    this.maybeRunAI(room);
   }
 
   getRoom(id) { return this.rooms.get(id); }
@@ -618,6 +709,13 @@ export class GameManager {
     let gameElo = null;
     try { gameElo = this.recordGameStats(room, { winnerSeat, isDraw }); } catch { /* ignore */ }
 
+    // Series bookkeeping: award points and decide whether the league continues.
+    if (room.series && !room.series.done) {
+      this._scoreSeriesGame(room, { winnerSeat, isDraw });
+      if (room.series.index >= room.series.configs.length - 1) room.series.done = true;
+      else { room.series.intermission = true; room.series.readyVotes = new Set(); }
+    }
+
     this.broadcast(room, 'game:over', {
       winner: winnerSeat,
       winnerName: winnerPlayer?.name ?? null,
@@ -626,6 +724,7 @@ export class GameManager {
       reason: endReason,
       elo: eloResult,
       gameElo,
+      series: this.seriesView ? room.seriesView() : null,
       clock: room.clockView(),
       state: room.game.toState(),
     });

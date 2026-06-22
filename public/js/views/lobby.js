@@ -19,6 +19,13 @@ const GAMES = [
 ];
 function gameLabel(id) { const g = GAMES.find((x) => x.id === id); return g ? `${g.icon} ${g.name}` : id; }
 
+// Which games can appear in an N-player league (mirrors the server).
+const SERIES_GAMES = {
+  2: ['quoridor', 'chess', 'chesszade', 'hokm', 'pasur', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'],
+  3: ['hokm'],
+  4: ['quoridor', 'chess4', 'hokm'],
+};
+
 export function LobbyView() {
   const socket = getSocket();
   let gameType = 'quoridor';
@@ -109,6 +116,7 @@ export function LobbyView() {
     h('div', { class: 'lobby-grid', style: 'margin-top:26px' },
       h('div', { class: 'mode-list' },
         modeCard('🤝', 'دعوت دوست', 'یک اتاق خصوصی بساز و کد دعوت را بفرست.', () => openPrivate()),
+        modeCard('🏆', 'لیگ چندبازیه', 'چند بازی را پشت‌سر‌هم با امتیاز کل بازی کن.', () => openSeries()),
         modeCard('🤖', 'بازی با هوش مصنوعی', 'با سه سطح سختی تمرین کن.', () => openAI()),
         modeCard('🔑', 'ورود با کد', 'به اتاق دوستت با کد دعوت بپیوند.', () => openJoin()),
       ),
@@ -222,6 +230,70 @@ export function LobbyView() {
         { label: 'شروع', class: 'btn-primary', onClick: () => {
           socket.emit('room:createAI', { config: { ...customizer.getConfig(), gameType }, difficulty }, (res) => {
             if (!res?.ok) return toast(res?.error || 'خطا', 'error');
+            navigate(`/game/${res.roomId}`);
+          });
+        } },
+      ],
+    });
+  }
+
+  function openSeries() {
+    let players = 2;
+    let playlist = [];
+    let bots = 0;
+    let botDifficulty = 'normal';
+
+    const availMount = h('div', { class: 'series-pick' });
+    const chosenMount = h('div', { class: 'series-chosen' });
+    const gamesFor = (n) => SERIES_GAMES[n].map((id) => GAMES.find((g) => g.id === id)).filter(Boolean);
+
+    function renderAvail() {
+      availMount.innerHTML = '';
+      gamesFor(players).forEach((g) => {
+        availMount.append(h('button', { class: 'btn btn-sm', type: 'button',
+          onclick: () => { if (playlist.length < 12) { playlist.push(g.id); renderChosen(); } } }, `+ ${g.icon} ${g.name}`));
+      });
+    }
+    function renderChosen() {
+      chosenMount.innerHTML = '';
+      if (!playlist.length) { chosenMount.append(h('p', { class: 'faint' }, 'حداقل ۲ بازی به فهرست اضافه کن.')); return; }
+      playlist.forEach((id, i) => {
+        const g = GAMES.find((x) => x.id === id);
+        chosenMount.append(h('div', { class: 'series-chosen-row' },
+          h('span', {}, `${faNum(i + 1)}. ${g.icon} ${g.name}`),
+          h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => { playlist.splice(i, 1); renderChosen(); } }, '✕')));
+      });
+    }
+
+    const playerSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    [['۲ نفره', 2], ['۳ نفره', 3], ['۴ نفره', 4]].forEach(([l, v]) => {
+      const b = h('button', { class: v === players ? 'active' : '' }, l);
+      b.addEventListener('click', () => { players = v; playlist = []; [...playerSeg.children].forEach((x) => x.classList.toggle('active', x === b)); renderAvail(); renderChosen(); });
+      playerSeg.append(b);
+    });
+
+    const botSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    [['۰', 0], ['۱', 1], ['۲', 2], ['۳', 3]].forEach(([l, v]) => {
+      const b = h('button', { class: v === bots ? 'active' : '' }, l);
+      b.addEventListener('click', () => { bots = v; [...botSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
+      botSeg.append(b);
+    });
+
+    renderAvail(); renderChosen();
+    modal({
+      title: '🏆 ساخت لیگ چندبازیه',
+      body: h('div', {},
+        h('div', { class: 'opt-group' }, h('label', {}, 'تعداد بازیکنان'), playerSeg),
+        h('div', { class: 'opt-group' }, h('label', {}, 'بازی‌های موجود (به ترتیب اضافه کن)'), availMount),
+        h('div', { class: 'opt-group' }, h('label', {}, 'فهرست لیگ'), chosenMount),
+        h('div', { class: 'opt-group' }, h('label', {}, '🤖 پر کردن صندلی‌ها با بات'), botSeg),
+      ),
+      actions: [
+        { label: 'انصراف', class: 'btn-ghost' },
+        { label: 'ساخت لیگ', class: 'btn-primary', onClick: () => {
+          if (playlist.length < 2) { toast('حداقل ۲ بازی انتخاب کن', 'error'); return true; }
+          socket.emit('room:createSeries', { playlist, players, bots, botDifficulty }, (res) => {
+            if (!res?.ok) return toast(res?.error || 'خطا در ساخت لیگ', 'error');
             navigate(`/game/${res.roomId}`);
           });
         } },

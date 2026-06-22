@@ -55,6 +55,34 @@ export function registerSocket(io, manager) {
       }
     });
 
+    /* ------------------------------ Series ------------------------------- */
+    socket.on('room:createSeries', (opts, cb) => {
+      try {
+        const room = manager.createSeries(opts || {});
+        const seat = manager.seatPlayer(room, socket, socket.data.identity, 0);
+        const bots = parseInt(opts?.bots, 10) || 0;
+        if (bots > 0) manager.fillBots(room, bots, opts?.botDifficulty);
+        manager.maybeStart(room);
+        cb?.({ ok: true, roomId: room.id, code: room.code, seat, view: room.publicView(seat) });
+      } catch (e) {
+        cb?.({ ok: false, error: e.message });
+      }
+    });
+
+    // Vote to advance an intermission series to its next game. Every connected
+    // human must be ready (mirrors the rematch flow).
+    socket.on('series:next', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room?.series || room.series.done || !room.series.intermission) return cb?.({ ok: false });
+      const seat = room.seatOf(socket.id);
+      if (seat < 0) return cb?.({ ok: false });
+      room.series.readyVotes.add(seat);
+      manager.broadcast(room, 'series:ready', { votes: [...room.series.readyVotes] });
+      const humans = room.humanSeats().filter((s) => room.players[s]?.connected);
+      if (room.series.readyVotes.size >= humans.length) manager.advanceSeries(room);
+      cb?.({ ok: true });
+    });
+
     /* ----------------------- Bots in private rooms ----------------------- */
     // Only the host (seat 0) of a non-matchmaking room may add/remove bots,
     // and only while the room is still waiting to start.
