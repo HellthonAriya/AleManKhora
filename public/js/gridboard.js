@@ -11,15 +11,9 @@
    setMySeat, setState, setInteractive, destroy, _resize.
    ========================================================================= */
 
-const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+import { gridTheme } from './boardthemes.js';
 
-// Per-game board palettes. config.colors[0|1] always sets the two players'
-// piece colours; these only style the board itself.
-const LOOK = {
-  tictactoe: { bg: '#11151c', grid: 'rgba(255,255,255,.16)', line: 5, frame: '#0c0f15' },
-  gomoku:    { bg: '#caa45a', grid: 'rgba(40,26,8,.55)',     line: 1.4, frame: '#8a6b30', star: 'rgba(40,26,8,.7)' },
-  othello:   { bg: '#1c7a48', grid: 'rgba(0,0,0,.35)',       line: 1.4, frame: '#0f4a2b' },
-};
+const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
 export class GridRenderer {
   constructor(canvas, { onAction } = {}) {
@@ -145,15 +139,14 @@ export class GridRenderer {
     if (!ctx) return;
     const st = this.state;
     const { n, S, margin, cell } = this._metrics();
-    const look = LOOK[st?.gameType] || LOOK.othello;
+    const look = gridTheme(st?.gameType, this.config?.boardTheme);
     ctx.save();
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     ctx.clearRect(0, 0, S, S);
     if (!st) { ctx.restore(); return; }
 
     // Frame + board
-    this._roundRect(0, 0, S, S, 16); ctx.fillStyle = look.frame; ctx.fill();
-    const inner = S - 2 * margin;
+    this._roundRect(0, 0, S, S, 16); ctx.fillStyle = look.frame || '#0c0f15'; ctx.fill();
     this._roundRect(margin * 0.5, margin * 0.5, S - margin, S - margin, 12);
     ctx.fillStyle = look.bg; ctx.fill();
 

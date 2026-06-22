@@ -6,6 +6,8 @@
    setInteractive/destroy/_resize).
    ========================================================================= */
 
+import { gridTheme } from './boardthemes.js';
+
 export class DotsRenderer {
   constructor(canvas, { onAction } = {}) {
     this.canvas = canvas;
@@ -118,7 +120,8 @@ export class DotsRenderer {
     ctx.save();
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     ctx.clearRect(0, 0, S, S);
-    this._roundRect(0, 0, S, S, 16); ctx.fillStyle = '#0e1118'; ctx.fill();
+    const look = gridTheme('dots', this.config?.boardTheme);
+    this._roundRect(0, 0, S, S, 16); ctx.fillStyle = look.bg; ctx.fill();
     if (!st) { ctx.restore(); return; }
 
     // Filled boxes

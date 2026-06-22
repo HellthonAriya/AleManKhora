@@ -408,10 +408,17 @@ export class HokmRenderer {
       default:          cx = S*(1-OPP_CX_SIDE);  cy = S * OPP_CY_SIDE; horizontal = false; break;
     }
 
-    const shown = Math.min(count, 7), gap = CW * 0.28, span = (shown - 1) * gap;
+    const shown = Math.min(count, 7), gap = CW * 0.30, span = (shown - 1) * gap;
     for (let i = 0; i < shown; i++) {
       const off = -span / 2 + i * gap;
-      this._cardBack(ctx, (horizontal ? cx + off : cx) - CW / 2, (horizontal ? cy : cy + off) - CH / 2, CW, CH, this._seatColor(seat));
+      const px = (horizontal ? cx + off : cx);
+      const py = (horizontal ? cy : cy + off);
+      // Slight fan tilt — cards feel like a held hand, not a flat stack.
+      const tilt = horizontal ? (i - (shown - 1) / 2) * 0.055 : 0;
+      ctx.save();
+      if (tilt) { ctx.translate(px, py); ctx.rotate(tilt); ctx.translate(-px, -py); }
+      this._cardBack(ctx, px - CW / 2, py - CH / 2, CW, CH, this._seatColor(seat));
+      ctx.restore();
     }
 
     if (active) {
@@ -553,25 +560,92 @@ export class HokmRenderer {
 
   /* ── Card art ───────────────────────────────────────────────────────── */
   _cardFace(ctx, x, y, w, h, card) {
-    this._rr(x, y, w, h, w * 0.12);
-    ctx.fillStyle = '#fbfaf6'; ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 1; ctx.stroke();
-    const col = SUIT_COLOR[card.s];
-    ctx.fillStyle = col;
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.font = `bold ${h * 0.22}px sans-serif`;
-    ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.05);
-    ctx.font = `${h * 0.20}px serif`;
-    ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.28);
-    ctx.font = `${h * 0.40}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.63);
+    const style = this.config?.cardStyle || 'classic';
+    const r = w * 0.12;
+    if (style === 'dark') {
+      const NEON = ['#4ee6f8', '#ff6b77', '#ffd76b', '#56e08c'];
+      this._rr(x, y, w, h, r); ctx.fillStyle = '#131926'; ctx.fill();
+      ctx.strokeStyle = NEON[card.s] + '55'; ctx.lineWidth = 1.2; ctx.stroke();
+      const col = NEON[card.s];
+      ctx.save();
+      ctx.shadowColor = col; ctx.shadowBlur = 8;
+      ctx.fillStyle = '#e8eaf6'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.22}px sans-serif`;
+      ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.05);
+      ctx.fillStyle = col;
+      ctx.font = `${h * 0.20}px serif`;
+      ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.28);
+      ctx.font = `${h * 0.40}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.63);
+      ctx.restore();
+    } else if (style === 'royal') {
+      const RICH = ['#0d1012', '#b8122a', '#b8122a', '#0d1012'];
+      this._rr(x, y, w, h, r); ctx.fillStyle = '#fdf6e3'; ctx.fill();
+      ctx.strokeStyle = RICH[card.s]; ctx.lineWidth = 1.5; ctx.stroke();
+      // Inner decorative border
+      ctx.save(); ctx.strokeStyle = RICH[card.s] + '33'; ctx.lineWidth = 1;
+      this._rr(x + w * 0.1, y + h * 0.07, w * 0.8, h * 0.86, r * 0.5); ctx.stroke(); ctx.restore();
+      const col = RICH[card.s];
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.22}px Georgia,serif`;
+      ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.04);
+      ctx.font = `${h * 0.19}px serif`;
+      ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.26);
+      ctx.font = `${h * 0.42}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.60);
+      // Upside-down corner (double-headed)
+      ctx.save(); ctx.translate(x + w, y + h); ctx.rotate(Math.PI);
+      ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.20}px Georgia,serif`;
+      ctx.fillText(rankLabel(card.r), w * 0.09, h * 0.05);
+      ctx.font = `${h * 0.17}px serif`;
+      ctx.fillText(SUIT[card.s], w * 0.09, h * 0.24);
+      ctx.restore();
+    } else {
+      // classic
+      this._rr(x, y, w, h, r); ctx.fillStyle = '#fbfaf6'; ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 1; ctx.stroke();
+      const col = SUIT_COLOR[card.s];
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.22}px sans-serif`;
+      ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.05);
+      ctx.font = `${h * 0.20}px serif`;
+      ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.28);
+      ctx.font = `${h * 0.40}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.63);
+    }
   }
   _cardBack(ctx, x, y, w, h, accent) {
-    this._rr(x, y, w, h, w * 0.14);
-    ctx.fillStyle = '#1e2a3a'; ctx.fill();
-    ctx.strokeStyle = accent || '#3a7a'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.09)';
-    this._rr(x + w * 0.18, y + h * 0.13, w * 0.64, h * 0.74, w * 0.10); ctx.fill();
+    const style = this.config?.cardStyle || 'classic';
+    const r = w * 0.14;
+    if (style === 'dark') {
+      this._rr(x, y, w, h, r); ctx.fillStyle = '#0c1020'; ctx.fill();
+      ctx.strokeStyle = (accent || '#4ee6f8') + 'aa'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.save(); ctx.strokeStyle = (accent || '#4ee6f8') + '33'; ctx.lineWidth = 0.8;
+      this._rr(x + w * 0.18, y + h * 0.12, w * 0.64, h * 0.76, r * 0.6); ctx.stroke(); ctx.restore();
+    } else if (style === 'royal') {
+      this._rr(x, y, w, h, r); ctx.fillStyle = accent || '#1a2a4a'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,230,160,.6)'; ctx.lineWidth = 1.5; ctx.stroke();
+      // Diagonal hatching
+      ctx.save(); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+      for (let d = -h; d < w + h; d += w * 0.22) {
+        ctx.beginPath(); ctx.moveTo(x + d, y); ctx.lineTo(x + d + h, y + h); ctx.stroke();
+      }
+      ctx.restore();
+      // Center ornament
+      ctx.fillStyle = 'rgba(255,230,160,.55)';
+      ctx.font = `${h * 0.30}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('✦', x + w / 2, y + h / 2);
+    } else {
+      // classic
+      this._rr(x, y, w, h, r); ctx.fillStyle = '#1e2a3a'; ctx.fill();
+      ctx.strokeStyle = accent || '#3a7a'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.09)';
+      this._rr(x + w * 0.18, y + h * 0.13, w * 0.64, h * 0.74, w * 0.10); ctx.fill();
+    }
   }
   _rr(x, y, w, h, r) {
     const ctx = this.ctx; r = Math.min(r, w / 2, h / 2);

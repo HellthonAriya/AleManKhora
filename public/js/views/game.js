@@ -1,7 +1,7 @@
 /* اَلِ من خورا — In-game view (real-time room): Quoridor or Chess (2/4-player),
    chess clock, spectating, chat, invites, resign, draw offers, rematch, voice. */
 import { h, store, toast, modal, faNum, clear, initials, confirmDialog, formatClock, copyText, applyTheme, THEMES, api } from '../core.js';
-import { TABLE_THEMES } from '../boardthemes.js';
+import { TABLE_THEMES, CARD_STYLES, GRID_THEMES } from '../boardthemes.js';
 import { BoardRenderer } from '../board.js';
 import { ChessBoardRenderer } from '../chessboard.js';
 import { GridRenderer } from '../gridboard.js';
@@ -19,6 +19,10 @@ const PIECE_FA = { p: 'سرباز', n: 'اسب', b: 'فیل', r: 'رخ', q: 'و�
 const TEAM_NAMES = ['تیم قرمز/زرد', 'تیم آبی/سبز'];
 // Games whose felt/table can be re-themed in-game (chess/quoridor have their own).
 const BOARD_THEME_GAMES = ['backgammon', 'hokm', 'pasur'];
+// Card-based games with card face/back style options.
+const CARD_STYLE_GAMES = ['hokm', 'pasur'];
+// Grid games with board palette options.
+const GRID_GAMES = ['tictactoe', 'gomoku', 'othello', 'dots'];
 
 export function GameView(roomId) {
   const socket = getSocket();
@@ -460,29 +464,48 @@ export function GameView(roomId) {
     card.append(h('div', { class: 'opt-group' }, h('label', {}, 'تم صفحه'), row));
     const bt = boardThemeSelector();
     if (bt) card.append(bt);
+    const cs = cardStyleSelector();
+    if (cs) card.append(cs);
     return card;
   }
   function boardThemeSelector() {
-    let opts, cur, apply;
+    let opts, label, cur, apply;
     if (isChess) {
       opts = [['classic', 'کلاسیک'], ['green', 'سبز'], ['blue', 'آبی'], ['wood', 'چوب'], ['gray', 'خاکستری'], ['midnight', 'نیمه‌شب']];
-      cur = config?.boardTheme || 'classic';
+      label = 'تم تخته'; cur = config?.boardTheme || 'classic';
       apply = (v) => { config.boardTheme = v; renderer?.setConfig({ boardTheme: v }); };
     } else if (gameType === 'quoridor') {
       opts = THEMES.map((t) => [t.id, t.name]);
-      cur = config?.theme || 'emerald';
+      label = 'تم تخته'; cur = config?.theme || 'emerald';
       apply = (v) => { config.theme = v; renderer?.setConfig({ theme: v }); };
     } else if (BOARD_THEME_GAMES.includes(gameType)) {
       opts = TABLE_THEMES.map((t) => [t.id, t.name]);
-      cur = config?.boardTheme || 'classic';
+      label = 'تم میز'; cur = config?.boardTheme || 'classic';
+      apply = (v) => { config.boardTheme = v; renderer?.setConfig({ boardTheme: v }); };
+    } else if (GRID_GAMES.includes(gameType)) {
+      const themes = GRID_THEMES[gameType] || [];
+      if (!themes.length) return null;
+      opts = themes.map((t) => [t.id, t.name]);
+      label = 'تم تخته'; cur = config?.boardTheme || themes[0].id;
       apply = (v) => { config.boardTheme = v; renderer?.setConfig({ boardTheme: v }); };
     } else return null;
     const seg = h('div', { class: 'seg seg-wrap', style: 'flex-wrap:wrap;gap:6px' });
-    opts.forEach(([v, label]) => {
-      const b = h('button', { class: v === cur ? 'active' : '', onclick: () => { apply(v); [...seg.children].forEach((x) => x.classList.toggle('active', x === b)); } }, label);
+    opts.forEach(([v, lbl]) => {
+      const b = h('button', { class: v === cur ? 'active' : '', onclick: () => { apply(v); [...seg.children].forEach((x) => x.classList.toggle('active', x === b)); } }, lbl);
       seg.append(b);
     });
-    return h('div', { class: 'opt-group', style: 'margin-top:8px' }, h('label', {}, 'تم تخته/میز'), seg);
+    return h('div', { class: 'opt-group', style: 'margin-top:8px' }, h('label', {}, label), seg);
+  }
+  function cardStyleSelector() {
+    if (!CARD_STYLE_GAMES.includes(gameType)) return null;
+    const cur = config?.cardStyle || 'classic';
+    const apply = (v) => { config.cardStyle = v; renderer?.setConfig({ cardStyle: v }); };
+    const seg = h('div', { class: 'seg seg-wrap', style: 'flex-wrap:wrap;gap:6px' });
+    CARD_STYLES.forEach(({ id, name }) => {
+      const b = h('button', { class: id === cur ? 'active' : '', onclick: () => { apply(id); [...seg.children].forEach((x) => x.classList.toggle('active', x === b)); } }, name);
+      seg.append(b);
+    });
+    return h('div', { class: 'opt-group', style: 'margin-top:8px' }, h('label', {}, 'سبک کارت'), seg);
   }
 
   /* ========================= Chess clock ========================= */

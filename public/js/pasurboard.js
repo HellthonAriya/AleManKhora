@@ -417,20 +417,61 @@ export class PasurRenderer {
 
   /* ── Card art ───────────────────────────────────────────────────────── */
   _cardFace(ctx, x, y, w, h, card, dim) {
-    this._rr(x, y, w, h, w * 0.12);
-    ctx.fillStyle = dim ? '#d9d6cd' : '#fbfaf6'; ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 1; ctx.stroke();
+    const style = this.config?.cardStyle || 'classic';
+    const r = w * 0.12;
     ctx.save();
-    if (dim) ctx.globalAlpha = 0.5;
-    const col = SUIT_COLOR[card.s];
-    ctx.fillStyle = col;
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.font = `bold ${h * 0.22}px sans-serif`;
-    ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.05);
-    ctx.font = `${h * 0.2}px serif`;
-    ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.28);
-    ctx.font = `${h * 0.4}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.63);
+    if (dim) ctx.globalAlpha = 0.48;
+    if (style === 'dark') {
+      const NEON = ['#4ee6f8', '#ff6b77', '#ffd76b', '#56e08c'];
+      this._rr(x, y, w, h, r); ctx.fillStyle = dim ? '#0c111d' : '#131926'; ctx.fill();
+      ctx.strokeStyle = NEON[card.s] + '55'; ctx.lineWidth = 1.2; ctx.stroke();
+      const col = NEON[card.s];
+      ctx.shadowColor = col; ctx.shadowBlur = dim ? 0 : 7;
+      ctx.fillStyle = '#dde0f0'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.22}px sans-serif`;
+      ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.05);
+      ctx.fillStyle = col; ctx.shadowBlur = dim ? 0 : 7;
+      ctx.font = `${h * 0.20}px serif`;
+      ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.28);
+      ctx.font = `${h * 0.40}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.63);
+    } else if (style === 'royal') {
+      const RICH = ['#0d1012', '#b8122a', '#b8122a', '#0d1012'];
+      this._rr(x, y, w, h, r); ctx.fillStyle = dim ? '#e8e0cc' : '#fdf6e3'; ctx.fill();
+      ctx.strokeStyle = RICH[card.s]; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.save(); ctx.strokeStyle = RICH[card.s] + '33'; ctx.lineWidth = 1;
+      this._rr(x + w * 0.1, y + h * 0.07, w * 0.8, h * 0.86, r * 0.5); ctx.stroke(); ctx.restore();
+      const col = RICH[card.s];
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.22}px Georgia,serif`;
+      ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.04);
+      ctx.font = `${h * 0.19}px serif`;
+      ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.26);
+      ctx.font = `${h * 0.42}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.60);
+      ctx.save(); ctx.translate(x + w, y + h); ctx.rotate(Math.PI);
+      ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.20}px Georgia,serif`;
+      ctx.fillText(rankLabel(card.r), w * 0.09, h * 0.05);
+      ctx.font = `${h * 0.17}px serif`;
+      ctx.fillText(SUIT[card.s], w * 0.09, h * 0.24);
+      ctx.restore();
+    } else {
+      // classic
+      this._rr(x, y, w, h, r);
+      ctx.fillStyle = dim ? '#d9d6cd' : '#fbfaf6'; ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 1; ctx.stroke();
+      const col = SUIT_COLOR[card.s];
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = `bold ${h * 0.22}px sans-serif`;
+      ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.05);
+      ctx.font = `${h * 0.2}px serif`;
+      ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.28);
+      ctx.font = `${h * 0.4}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(SUIT[card.s], x + w * 0.52, y + h * 0.63);
+    }
     ctx.restore();
   }
   _cardOutline(ctx, x, y, w, h, color, lw) {
@@ -441,11 +482,32 @@ export class PasurRenderer {
     ctx.restore();
   }
   _cardBack(ctx, x, y, w, h, accent) {
-    this._rr(x, y, w, h, w * 0.14);
-    ctx.fillStyle = '#1e2a3a'; ctx.fill();
-    ctx.strokeStyle = accent || '#3a7a'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.09)';
-    this._rr(x + w * 0.18, y + h * 0.13, w * 0.64, h * 0.74, w * 0.1); ctx.fill();
+    const style = this.config?.cardStyle || 'classic';
+    const r = w * 0.14;
+    if (style === 'dark') {
+      this._rr(x, y, w, h, r); ctx.fillStyle = '#0c1020'; ctx.fill();
+      ctx.strokeStyle = (accent || '#4ee6f8') + 'aa'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.save(); ctx.strokeStyle = (accent || '#4ee6f8') + '33'; ctx.lineWidth = 0.8;
+      this._rr(x + w * 0.18, y + h * 0.12, w * 0.64, h * 0.76, r * 0.6); ctx.stroke(); ctx.restore();
+    } else if (style === 'royal') {
+      this._rr(x, y, w, h, r); ctx.fillStyle = accent || '#1a2a4a'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,230,160,.6)'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.save(); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+      for (let d = -h; d < w + h; d += w * 0.22) {
+        ctx.beginPath(); ctx.moveTo(x + d, y); ctx.lineTo(x + d + h, y + h); ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = 'rgba(255,230,160,.55)';
+      ctx.font = `${h * 0.30}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('✦', x + w / 2, y + h / 2);
+    } else {
+      // classic
+      this._rr(x, y, w, h, r); ctx.fillStyle = '#1e2a3a'; ctx.fill();
+      ctx.strokeStyle = accent || '#3a7a'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.09)';
+      this._rr(x + w * 0.18, y + h * 0.13, w * 0.64, h * 0.74, w * 0.1); ctx.fill();
+    }
   }
   _rr(x, y, w, h, r) {
     const ctx = this.ctx; r = Math.min(r, w / 2, h / 2);
