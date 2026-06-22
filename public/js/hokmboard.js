@@ -312,16 +312,19 @@ export class HokmRenderer {
     if (this._pendingCollect && now >= this._pendingCollect.at) {
       const winner = this._pendingCollect.winner;
       if (winner != null) {
-        const where = place[winner];
-        const to = this._pilePos(where, S, H);
+        let to;
+        if (st.teams && st.numPlayers > 2) {
+          const myTeam  = this.mySeat >= 0 ? this.mySeat % 2 : 0;
+          const winTeam = winner % 2;
+          to = this._teamPilePos(winTeam === myTeam ? 'mine' : 'opp', S, H);
+        } else {
+          to = this._pilePos(place[winner], S, H);
+        }
         this._trickPileAnims.push({ winner, from: { x: S / 2, y: H * TABLE_CY }, to, t0: now, dur: 540 });
       }
       this._pendingCollect = null;
       this._ensureAnim();
     }
-
-    // ── Trick piles (drawn before cards so active cards appear on top) ──
-    this._drawTrickPiles(ctx, S, H, st, place);
 
     // ── Zone A: info bar ──
     this._drawInfoBar(ctx, S, st);
@@ -346,6 +349,9 @@ export class HokmRenderer {
 
     // ── Zone E: my hand ──
     this._drawMyHand(ctx, S, st, CW, CH);
+
+    // ── Trick piles on top of all static layers ──
+    this._drawTrickPiles(ctx, S, H, st, place);
 
     // ── Trick collect animations ──
     this._drawTrickAnims(ctx, S, H);
@@ -555,48 +561,72 @@ export class HokmRenderer {
     }
   }
 
-  /* ── Trick pile geometry ────────────────────────────────────────────── */
+  /* ── Trick pile geometry ─────────────────────────────────────────────── */
+  // Individual seat positions (2-player or non-team 4-player)
   _pilePos(where, S, H) {
     switch (where) {
-      case 'bottom':   return { x: S * 0.90, y: H * 0.875 };  // beside my hand
-      case 'top':      return { x: S * 0.12, y: H * 0.10 };   // top-left corner
-      case 'topleft':  return { x: S * 0.07, y: H * 0.07 };
-      case 'topright': return { x: S * 0.93, y: H * 0.07 };
-      case 'left':     return { x: S * 0.06, y: H * 0.66 };   // below left opponent
-      default:         return { x: S * 0.94, y: H * 0.66 };   // below right opponent
+      case 'bottom':   return { x: S * 0.09, y: H * HAND_BASE_Y + S * 0.07 };
+      case 'top':      return { x: S * 0.91, y: H * OPP_CY_TOP };
+      case 'topleft':  return { x: S * 0.07, y: H * OPP_CY_TOP + S * 0.01 };
+      case 'topright': return { x: S * 0.93, y: H * OPP_CY_TOP + S * 0.01 };
+      case 'left':     return { x: S * 0.07, y: H * OPP_CY_SIDE + S * 0.15 };
+      default:         return { x: S * 0.93, y: H * OPP_CY_SIDE + S * 0.15 };
     }
   }
+  // Shared team pile positions (used in team mode and for animation targets)
+  _teamPilePos(which, S, H) {
+    if (which === 'mine') return { x: S * 0.09, y: H * HAND_BASE_Y + S * 0.07 };
+    return { x: S * 0.91, y: H * OPP_CY_TOP };
+  }
 
-  /* ── Graphical trick-pile stacks for each seat ──────────────────────── */
+  /* ── Graphical trick-pile stacks ─────────────────────────────────────── */
   _drawTrickPiles(ctx, S, H, st, place) {
-    const mw = S * 0.065, mh = mw * 1.40;
-    for (let s = 0; s < st.numPlayers; s++) {
-      const count = st.tricksWon?.[s] ?? 0;
-      if (count === 0 && s !== this.mySeat) continue;
-      const where = place[s];
-      const pos   = this._pilePos(where, S, H);
-      if (count === 0) {
-        // Empty placeholder outline
-        this._rr(pos.x - mw / 2, pos.y - mh / 2, mw, mh, mw * 0.14);
-        ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1; ctx.stroke();
-      } else {
-        const shown = Math.min(count, 6);
-        for (let i = 0; i < shown; i++) {
-          this._cardBack(ctx, pos.x - mw / 2 + i * 1.8, pos.y - mh / 2 - i * 2.2, mw, mh, this._seatColor(s));
-        }
+    if (st.teams && st.numPlayers > 2) {
+      // Team mode — one shared pile per team, teammates' tricks combined
+      const myTeam   = this.mySeat >= 0 ? this.mySeat % 2 : 0;
+      const myCount  = st.teamTricks?.[myTeam]     ?? 0;
+      const oppCount = st.teamTricks?.[1 - myTeam] ?? 0;
+      const myColor  = this._seatColor(this.mySeat >= 0 ? this.mySeat : 0);
+      const oppColor = this._seatColor((this.mySeat >= 0 ? this.mySeat : 0) % 2 === 0 ? 1 : 0);
+      this._drawPileStack(ctx, this._teamPilePos('mine', S, H), myCount,  myColor,  S, true);
+      this._drawPileStack(ctx, this._teamPilePos('opp',  S, H), oppCount, oppColor, S, false);
+    } else {
+      for (let s = 0; s < st.numPlayers; s++) {
+        const count = st.tricksWon?.[s] ?? 0;
+        if (count === 0 && s !== this.mySeat) continue;
+        this._drawPileStack(ctx, this._pilePos(place[s], S, H), count, this._seatColor(s), S, s === this.mySeat);
       }
-      ctx.fillStyle = count > 0 ? 'rgba(255,255,255,.82)' : 'rgba(255,255,255,.30)';
-      ctx.font = `bold ${S * 0.022}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.fillText(`${fa(count)} دست`, pos.x, pos.y + mh / 2 + 4);
     }
   }
 
-  /* ── Trick-collection fly animation ─────────────────────────────────── */
+  _drawPileStack(ctx, pos, count, color, S, showEmpty) {
+    const mw = S * 0.068, mh = mw * 1.40;
+    const dx = mw * 0.30;          // 30% of card width — each card clearly peeks out
+    const dy = mh * 0.08;          // slight upward shift gives depth
+    const shown = Math.min(count, 7);
+    const totalW = shown > 0 ? mw + (shown - 1) * dx : mw;
+    const sx = pos.x - totalW / 2; // left-align from centre so label stays centred
+
+    if (count === 0) {
+      if (!showEmpty) return;
+      this._rr(sx, pos.y - mh / 2, mw, mh, mw * 0.14);
+      ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 1; ctx.stroke();
+    } else {
+      for (let i = 0; i < shown; i++) {
+        this._cardBack(ctx, sx + i * dx, pos.y - mh / 2 - i * dy, mw, mh, color);
+      }
+    }
+    ctx.fillStyle = count > 0 ? 'rgba(255,255,255,.88)' : 'rgba(255,255,255,.28)';
+    ctx.font = `bold ${S * 0.023}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(`${fa(count)} دست`, pos.x, pos.y + mh / 2 + 4);
+  }
+
+  /* ── Trick-collection fly animation ──────────────────────────────────── */
   _drawTrickAnims(ctx, S, H) {
     const now = ts();
     this._trickPileAnims = this._trickPileAnims.filter((a) => now < a.t0 + a.dur);
-    const mw = S * 0.065, mh = mw * 1.40;
+    const mw = S * 0.068, mh = mw * 1.40;
     for (const a of this._trickPileAnims) {
       const raw  = Math.min(1, (now - a.t0) / a.dur);
       const ease = 1 - Math.pow(1 - raw, 3);
