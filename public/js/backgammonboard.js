@@ -13,7 +13,7 @@ import { tableTheme } from './boardthemes.js';
 const FELT = '#16321f', FELT2 = '#0f2417', FRAME = '#5a3a1c', FRAME2 = '#73491f';
 const POINT_A = '#d9b572', POINT_B = '#8a4f28', BAR = '#3a2614';
 const GOLD = '#ffd76b', GREEN = '#56e08c', CYAN = '#46d6ff';
-const MOVE_MS = 260, DICE_MS = 620;
+const SLIDE_MS = 300, FLY_MS = 400, DICE_MS = 620;
 
 export class BackgammonRenderer {
   constructor(canvas, { onAction } = {}) {
@@ -34,6 +34,7 @@ export class BackgammonRenderer {
     this._anim = null;          // { seat, from, to, t0 } checker slide
     this._hitAnim = null;       // { seat, to, t0 } a hit checker; t0 = when it STARTS flying out
     this._pendingBurst = null;  // { at, x, y, color, n } spark burst fired on arrival
+    this._shockwaves = [];      // [ { x, y, t0, dur, color } ] expanding impact rings
     this._diceUntil = 0;        // tumbling-dice animation end timestamp
     this._rolledKey = null;     // turn identity for which we've already rolled
     this._curTurn = null;
@@ -48,7 +49,7 @@ export class BackgammonRenderer {
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
     // Returning to a backgrounded tab pauses rAF mid-animation; redraw fresh.
-    this._onVis = () => { if (document.visibilityState === 'visible') { this._anim = null; this._hitAnim = null; this._pendingBurst = null; this._ensureAnim(); this.draw(); } };
+    this._onVis = () => { if (document.visibilityState === 'visible') { this._anim = null; this._hitAnim = null; this._pendingBurst = null; this._shockwaves = []; this._ensureAnim(); this.draw(); } };
     document.addEventListener('visibilitychange', this._onVis);
   }
   destroy() {
@@ -68,22 +69,22 @@ export class BackgammonRenderer {
 
     // Detect & animate the move that produced this state. Always drop any
     // previous in-flight animation first so a resync can't leave one frozen.
-    this._anim = null; this._hitAnim = null; this._pendingBurst = null;
+    this._anim = null; this._hitAnim = null; this._pendingBurst = null; this._shockwaves = [];
     const mv = this._detectMove(prev, state);
     if (mv) {
       this._anim = { ...mv, t0: now() };
       const g = this._geo();
       if (mv.hit != null) {
-        // Sequential hit: my checker slides onto the blot first (MOVE_MS), THEN
-        // the opponent's checker flies out to the bar. The red spark fires at the
-        // moment of contact (when my checker lands).
-        this._hitAnim = { seat: mv.hitSeat, to: mv.to, t0: now() + MOVE_MS };
+        // Sequential hit: my checker slides (SLIDE_MS), then the burst + shockwave
+        // fire at the moment of contact, then the opponent flies out (FLY_MS).
+        this._hitAnim = { seat: mv.hitSeat, to: mv.to, t0: now() + SLIDE_MS };
         const s = this._slot(mv.to);
-        this._pendingBurst = { at: now() + MOVE_MS, x: s.x, y: s.y + (s.top ? g.ckR : -g.ckR), color: '#ff5b6b', n: 18 };
+        const bx = s.x, by = s.y + (s.top ? g.ckR : -g.ckR);
+        this._pendingBurst = { at: now() + SLIDE_MS, x: bx, y: by, color: '#ff5040', n: 30, shockwave: true };
       } else if (mv.to === 'off') {
         // Gold sparks when a checker is borne off (fires as it reaches the tray).
         const os = this._offSlot(mv.seat, g);
-        this._pendingBurst = { at: now() + MOVE_MS, x: os.x, y: os.y + (os.top ? g.ckR : -g.ckR), color: GOLD, n: 20 };
+        this._pendingBurst = { at: now() + SLIDE_MS, x: os.x, y: os.y + (os.top ? g.ckR : -g.ckR), color: GOLD, n: 26, shockwave: true };
       }
     }
 
@@ -103,7 +104,7 @@ export class BackgammonRenderer {
       if (state.winner == null && state.turn === this.mySeat) {
         const eng = this._engine();
         const ok = eng && eng.legalMoves(this.mySeat).some((m) => m.from === ps.from && m.to === ps.to);
-        if (ok) setTimeout(() => this.onAction?.({ type: 'move', from: ps.from, to: ps.to }), MOVE_MS + 60);
+        if (ok) setTimeout(() => this.onAction?.({ type: 'move', from: ps.from, to: ps.to }), SLIDE_MS + 60);
       }
     }
 
@@ -148,17 +149,22 @@ export class BackgammonRenderer {
    *  (e.g. a frame was dropped while the tab was backgrounded). */
   _tickAnims() {
     const t = now();
-    // Fire the arrival spark exactly once, when the slide reaches its target.
+    // Fire the arrival burst + optional shockwave exactly once at contact.
     if (this._pendingBurst && t >= this._pendingBurst.at) {
       const b = this._pendingBurst; this._pendingBurst = null;
       this._spawnBurst(b.x, b.y, b.color, b.n);
+      if (b.shockwave) {
+        this._shockwaves.push({ x: b.x, y: b.y, t0: t, dur: 380, color: b.color });
+        this._shockwaves.push({ x: b.x, y: b.y, t0: t + 60, dur: 320, color: b.color }); // delayed 2nd ring
+      }
     }
-    if (this._anim && t - this._anim.t0 >= MOVE_MS) this._anim = null;
-    // _hitAnim.t0 is when it STARTS moving (after the slide); it ends MOVE_MS later.
-    if (this._hitAnim && t - this._hitAnim.t0 >= MOVE_MS) this._hitAnim = null;
+    this._shockwaves = this._shockwaves.filter((sw) => t - sw.t0 < sw.dur);
+    if (this._anim && t - this._anim.t0 >= SLIDE_MS) this._anim = null;
+    // _hitAnim.t0 is when it STARTS moving (after the slide); it ends FLY_MS later.
+    if (this._hitAnim && t - this._hitAnim.t0 >= FLY_MS) this._hitAnim = null;
   }
   _animActive() {
-    if (this._anim || this._hitAnim || this._pendingBurst) return true;
+    if (this._anim || this._hitAnim || this._pendingBurst || this._shockwaves.length) return true;
     if (this._particles.length) return true;
     if (now() < this._diceUntil) return true;
     if (this.interactive && (this.sel != null || this._needRoll())) return true; // pulse
@@ -436,8 +442,23 @@ export class BackgammonRenderer {
     ctx.restore();
   }
   _drawAnims(ctx, g) {
-    // Hit checker FIRST (so my landing checker draws on top of it). It sits on
-    // its point until my checker arrives (now < t0), then flies out to the bar.
+    // Shockwave rings — drawn under everything so checkers appear on top.
+    for (const sw of this._shockwaves) {
+      const dt = now() - sw.t0;
+      if (dt < 0 || dt >= sw.dur) continue;
+      const t = dt / sw.dur;
+      const r = g.ckR * (0.4 + 3.2 * t);   // expands from small to large
+      const alpha = (1 - t) * (1 - t) * 0.9;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.shadowColor = sw.color; ctx.shadowBlur = 18 * (1 - t);
+      ctx.strokeStyle = sw.color; ctx.lineWidth = 4 * (1 - t) + 0.5;
+      ctx.beginPath(); ctx.arc(sw.x, sw.y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+
+    // Hit checker FIRST (so my landing checker draws on top of it).
+    // It sits on its point while my checker slides, then gets "thrown" to the bar.
     if (this._hitAnim) {
       const slot = this._slot(this._hitAnim.to);
       const a = this._checkerXY(slot, 0, 1, g);
@@ -445,15 +466,26 @@ export class BackgammonRenderer {
       const b = { x: bs.x, y: bs.top ? bs.y + g.ckR : bs.y - g.ckR };
       const dt = now() - this._hitAnim.t0;
       if (dt < 0) {
-        this._checker(ctx, a.x, a.y, g.ckR, this._hitAnim.seat, false); // waiting to be hit
+        this._checker(ctx, a.x, a.y, g.ckR, this._hitAnim.seat, false); // still waiting
       } else {
-        const t = easeOut(Math.min(1, dt / MOVE_MS));
-        this._checker(ctx, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, g.ckR, this._hitAnim.seat, false);
+        // easeOutQuart: fast initial burst (feels thrown), then decelerates into bar
+        const t = easeOutQuart(Math.min(1, dt / FLY_MS));
+        // Slight parabolic arc: peak at halfway between a and b
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2 - g.ckR * 1.8; // arc upward
+        // Quadratic bezier
+        const bx = (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * mx + t * t * b.x;
+        const by = (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * my + t * t * b.y;
+        // Slightly shrink and fade as it leaves (squished by the hit)
+        const scale = 1 - 0.15 * t;
+        this._checkerScaled(ctx, bx, by, g.ckR * scale, this._hitAnim.seat, false);
       }
     }
-    // My sliding checker.
+
+    // My sliding checker — easeOutBack gives a tiny bounce on landing (has weight).
     if (this._anim) {
-      const t = easeOut(Math.min(1, (now() - this._anim.t0) / MOVE_MS));
+      const raw = Math.min(1, (now() - this._anim.t0) / SLIDE_MS);
+      const t = this._anim.hit ? easeOutBack(raw) : easeOut(raw);
       const from = this._anim.from === 'bar' ? this._barSlot(this._anim.seat, g) : this._slot(this._anim.from);
       const a = this._anim.from === 'bar' ? { x: from.x, y: from.top ? from.y + g.ckR : from.y - g.ckR } : this._checkerXY(from, 0, 1, g);
       let b;
@@ -461,6 +493,14 @@ export class BackgammonRenderer {
       else { const ds = this._slot(this._anim.to); const dp = this.state.points[this._anim.to]; const cnt = (dp && dp.seat === this._anim.seat) ? dp.count : 1; b = this._checkerXY(ds, cnt - 1, cnt, g); }
       this._checker(ctx, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, g.ckR, this._anim.seat, true);
     }
+  }
+  _checkerScaled(ctx, cx, cy, r, seat, highlight) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(r / Math.max(0.1, r), r / Math.max(0.1, r));
+    ctx.translate(-cx, -cy);
+    this._checker(ctx, cx, cy, r, seat, highlight);
+    ctx.restore();
   }
 
   _stack(ctx, slot, seat, count, g, selected) {
@@ -591,8 +631,8 @@ export class BackgammonRenderer {
   _spawnBurst(x, y, color, n) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = 0.6 + Math.random() * 2.2;
-      this._particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6, life: 1, color, r: 1.5 + Math.random() * 2.5, t0: now() });
+      const sp = 1.2 + Math.random() * 3.8; // faster / more spread
+      this._particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.0, life: 1, color, r: 2.5 + Math.random() * 3.5, t0: now() });
     }
     this._ensureAnim();
   }
@@ -664,6 +704,12 @@ function diceDisplay(st) {
 }
 function now() { return (typeof performance !== 'undefined' ? performance : Date).now(); }
 function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+// Slight overshoot ~5% past target, then snaps back — checker feels like it has weight.
+function easeOutBack(t) {
+  const c = 0.9;
+  return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2);
+}
 function shade(hex, amt) {
   const m = (hex || '#888888').replace('#', ''); if (m.length < 6) return hex;
   let r = parseInt(m.slice(0, 2), 16), g = parseInt(m.slice(2, 4), 16), b = parseInt(m.slice(4, 6), 16);
