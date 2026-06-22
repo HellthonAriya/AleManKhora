@@ -12,6 +12,7 @@ import { PasurRenderer } from '../pasurboard.js';
 import { openRules } from '../rules.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
+import { playSound, toggleSound, isSoundMuted } from '../sound.js';
 
 const SEAT_LABELS = ['۱', '۲', '۳', '۴'];
 const GAME_NAMES = {
@@ -706,12 +707,16 @@ export function GameView(roomId) {
       rematchPending = false; seriesPending = false;
       if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
       applyView(v);
+      playSound('start');
       const msg = v.series ? `بازی ${faNum((v.series.index ?? 0) + 1)}: ${GAME_NAMES[v.gameType] || v.gameType}` : 'بازی شروع شد! موفق باشی';
       toast(msg, 'success');
     },
     'series:ready': ({ votes }) => toast(`آمادهٔ بازی بعد (${faNum(votes.length)})`),
     'room:update': (v) => applyView(v),
-    'game:update': ({ state: s }) => { state = s; syncRenderer(); },
+    'game:update': ({ state: s }) => {
+      state = s; syncRenderer();
+      if (status === 'active' && !gameIsOver()) playSound(isMyTurnActive() ? 'turn' : 'move');
+    },
     'game:clock': (cv) => { setClock(cv); },
     'player:disconnect': ({ seat: s }) => { if (players[s]) players[s].connected = false; renderPlayerCards(); toast(`${players[s]?.name || 'بازیکن'} قطع شد`, 'error'); },
     'player:reconnect': ({ seat: s }) => { if (players[s]) players[s].connected = true; renderPlayerCards(); toast('بازیکن دوباره وصل شد', 'success'); },
@@ -726,7 +731,7 @@ export function GameView(roomId) {
       syncRenderer();
     },
     'spectator:update': () => {},
-    'game:reaction': ({ emoji, seat: s }) => flyReaction(emoji, s),
+    'game:reaction': ({ emoji, seat: s }) => { flyReaction(emoji, s); playSound('reaction'); },
     'chat:message': (m) => addChat(m),
     'game:rematchVote': ({ votes }) => toast(`درخواست بازی مجدد (${faNum(votes.length)})`),
     'game:drawOffer': ({ name }) => {
@@ -752,6 +757,10 @@ export function GameView(roomId) {
       if (data.series !== undefined) series = data.series;
       if (data.clock) setClock({ ...data.clock, running: false });
       syncRenderer();
+      if (!spectator) {
+        const iWon = data.winner === seat || (config?.teams && data.winner != null && data.winner % 2 === seat % 2);
+        playSound(data.draw ? 'notify' : iWon ? 'win' : 'lose');
+      }
       if (data.series) showSeriesStandings(data); else showGameOver(data);
     },
   };
@@ -931,6 +940,9 @@ export function GameView(roomId) {
   rejoinRoom();
 
   /* ========================= Layout ========================= */
+  const soundBtn = h('button', { class: 'btn btn-sm btn-ghost', title: 'صدا',
+    onclick: () => { const m = toggleSound(); soundBtn.textContent = m ? '🔇 صدا' : '🔊 صدا'; } },
+    isSoundMuted() ? '🔇 صدا' : '🔊 صدا');
   sideTop.append(seriesMount, playerCardsMount, controlsMount);
   sideBottom.append(
     h('div', { class: 'card' },
@@ -950,6 +962,7 @@ export function GameView(roomId) {
       h('div', { class: 'board-foot' },
         h('span', { class: 'faint' }, `اتاق: ${roomId.slice(0, 6)}`),
         h('button', { class: 'btn btn-sm btn-ghost', onclick: () => openRules(gameType) }, '📖 قوانین'),
+        soundBtn,
       ),
     ),
     sideBottom,
