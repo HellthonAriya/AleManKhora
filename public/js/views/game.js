@@ -631,6 +631,23 @@ export function GameView(roomId) {
     socket.emit('chat:message', { text }); chatInput.value = '';
   }
 
+  /* ========================= Reactions ========================= */
+  const REACTIONS = ['👍', '😂', '🔥', '😮', '😢', '👏', '❤️', '🤔', '🎉', '🧠'];
+  const reactionLayer = h('div', { class: 'reaction-layer' });
+  const reactionBar = h('div', { class: 'reaction-bar' },
+    ...REACTIONS.map((e) => h('button', { class: 'reaction-btn', type: 'button', title: 'واکنش', onclick: () => socket.emit('game:reaction', { emoji: e }) }, e)));
+  /** Float a reaction emoji up over the board, tagged with who sent it. */
+  function flyReaction(emoji, fromSeat) {
+    const who = players[fromSeat]?.name;
+    const pop = h('div', { class: 'reaction-pop' },
+      h('span', { class: 'reaction-emoji' }, emoji),
+      who ? h('span', { class: 'reaction-who', style: `border-color:${seatColor(fromSeat)}` }, who) : null);
+    pop.style.left = (12 + Math.random() * 72) + '%';
+    pop.style.setProperty('--drift', (Math.random() * 40 - 20) + 'px');
+    reactionLayer.append(pop);
+    setTimeout(() => pop.remove(), 2400);
+  }
+
   /* ========================= Socket events ========================= */
   function applyView(v) {
     config = v.config; state = v.state; players = v.players;
@@ -660,6 +677,7 @@ export function GameView(roomId) {
       syncRenderer();
     },
     'spectator:update': () => {},
+    'game:reaction': ({ emoji, seat: s }) => flyReaction(emoji, s),
     'chat:message': (m) => addChat(m),
     'game:rematchVote': ({ votes }) => toast(`درخواست بازی مجدد (${faNum(votes.length)})`),
     'game:drawOffer': ({ name }) => {
@@ -793,7 +811,8 @@ export function GameView(roomId) {
     h('div', { class: 'card' },
       h('div', { class: 'card-title' }, '💬 گفتگو'),
       h('div', { class: 'chat-box' }, chatLog,
-        h('div', { class: 'chat-input' }, chatInput, h('button', { class: 'btn btn-sm', onclick: sendChat }, 'ارسال')))),
+        h('div', { class: 'chat-input' }, chatInput, h('button', { class: 'btn btn-sm', onclick: sendChat }, 'ارسال'))),
+      reactionBar),
     voiceMount,
   );
 
@@ -801,7 +820,7 @@ export function GameView(roomId) {
     sideTop,
     h('div', { class: 'board-stage' },
       turnBanner,
-      h('div', { class: 'board-frame' }, canvas),
+      h('div', { class: 'board-frame' }, canvas, reactionLayer),
       wallTray,
       h('div', { class: 'board-foot' },
         h('span', { class: 'faint' }, `اتاق: ${roomId.slice(0, 6)}`),

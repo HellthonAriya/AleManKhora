@@ -31,6 +31,9 @@ function identityFromSocket(socket) {
   return { userId: user.id, guestId: null, name: user.username, elo: user.elo, isGuest: false };
 }
 
+// Whitelisted in-game reaction emojis (validated server-side).
+const REACTION_SET = new Set(['👍', '😂', '🔥', '😮', '😢', '👏', '❤️', '🤔', '🎉', '🧠']);
+
 export function registerSocket(io, manager) {
   io.on('connection', (socket) => {
     socket.data.identity = identityFromSocket(socket);
@@ -222,6 +225,19 @@ export function registerSocket(io, manager) {
         io.to(room.players[offerer].socketId).emit('game:drawDeclined');
       }
       cb?.({ ok: true });
+    });
+
+    /* ----------------------------- Reactions ----------------------------- */
+    socket.on('game:reaction', ({ emoji } = {}) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room || !REACTION_SET.has(emoji)) return;
+      // Light rate-limit: at most one reaction every 350ms per socket.
+      const now = Date.now();
+      if (now - (socket.data.lastReaction || 0) < 350) return;
+      socket.data.lastReaction = now;
+      manager.broadcast(room, 'game:reaction', {
+        emoji, seat: room.seatOf(socket.id), name: socket.data.identity.name,
+      });
     });
 
     /* ------------------------------- Chat -------------------------------- */
