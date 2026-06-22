@@ -10,6 +10,14 @@
        is selected), or «لغو» to un-stage.
    Emits { type:'play', card, capture:[…] }. Mirrors the other renderers'
    interface (setConfig/setMySeat/setState/setInteractive/destroy).
+
+   Layout is organised in clear vertical bands so nothing overlaps:
+     ┌─ info bar (جادو/کارت باقی/نوبت) ──────────────┐
+     │           opponent fan + pill                 │
+     │ piles                  table cards            │
+     │ (left)                 my hand                │
+     │           my stats · play/cancel              │
+     └───────────────────────────────────────────────┘
    ========================================================================= */
 import { PasurGame, fishValue, subsetsSummingTo } from './pasur.js';
 import { tableTheme } from './boardthemes.js';
@@ -23,8 +31,17 @@ const fa = (n) => String(n).replace(/\d/g, (d) => FA[+d]);
 const cardName = (c) => ({ 11: 'سرباز', 12: 'بی‌بی', 13: 'شاه', 14: 'آس' }[c.r] || fa(c.r)) + ' ' + SUIT[c.s];
 const key = (c) => `${c.s},${c.r}`;
 
-const FELT = '#0c5132', FELT_EDGE = '#063b22', GOLD = '#ffd76b', GREEN = '#5be08c';
-const FLASH_MS = 650;
+const GOLD = '#ffd76b', GREEN = '#5be08c';
+const FLASH_MS = 650, FLY_MS = 440, DEAL_MS = 380, DEAL_STAGGER = 65, SUR_MS = 1600;
+
+// Layout bands (fractions of the square canvas S).
+const INFO_Y = 0.022, INFO_H = 0.058;
+const OPP_CY = 0.155, OPP_PILL_Y = 0.222;
+const TABLE_CY = 0.445;
+const HAND_Y = 0.625;
+const STRIP_Y = 0.83;
+const PILE_OPP_Y = 0.30, PILE_ME_Y = 0.52, PILE_X = 0.038;
+const DECK_SPOT = { x: 0.5, y: 0.085 }; // where dealt cards fly from
 
 export class PasurRenderer {
   constructor(canvas, { onAction } = {}) {
@@ -45,19 +62,28 @@ export class PasurRenderer {
     this.buttons = [];         // { id, x, y, w, h, enabled }
     this.hover = -1;
 
+    // animation state
+    this._flyCards = [];       // [{card, fx, fy, tx, ty, t0, dur, w, h, faceDown, accent, kind, pileSeat}]
+    this._particles = [];
+    this._surFx = { until: 0, seat: -1 };
     this._flashUntil = 0;
     this._flashKeys = new Set();
-    this._lastCapCounts = null;
+    this._dealKeys = new Set();    // keys of cards mid-deal (skip in static layer)
+    this._oppFlyCount = 0;         // face-down deal cards heading to opponent
     this._raf = null;
+    this._init = false;
 
     this._dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     this._bind();
     this._resize();
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
+    this._onVis = () => { if (document.visibilityState === 'visible') { this._flyCards = []; this._particles = []; this._ensureAnim(); this.draw(); } };
+    document.addEventListener('visibilitychange', this._onVis);
   }
   destroy() {
     window.removeEventListener('resize', this._onResize);
+    document.removeEventListener('visibilitychange', this._onVis);
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
   }
 
@@ -67,6 +93,7 @@ export class PasurRenderer {
     this.interactive = v;
     this.canvas.style.cursor = v ? 'pointer' : 'default';
     if (!v) { this.staged = null; this.sel.clear(); }
+    this._ensureAnim();
     this.draw();
   }
   setState(state) {
@@ -74,45 +101,102 @@ export class PasurRenderer {
     this.state = state;
     try { this.engine = PasurGame.fromState(state); } catch { this.engine = null; }
 
-    // Flash newly captured table cards (anything that left the table).
     if (prev && state) {
-      const before = new Set((prev.table || []).map(key));
-      const after = new Set((state.table || []).map(key));
-      const gone = [...before].filter((k) => !after.has(k));
-      // Only flash when a capture happened (a pile grew), not a simple lay-down.
-      const grew = (state.capturedCounts || []).some((c, i) => c > (prev.capturedCounts?.[i] ?? 0));
-      if (gone.length && grew) { this._flashKeys = new Set(gone); this._flashUntil = now() + FLASH_MS; this._ensureAnim(); }
+      this._detectCapture(prev, state);
+      this._detectSur(prev, state);
     }
+    this._detectDeal(prev, state);
 
     // A fresh state means my staged selection is stale.
     this.staged = null; this.sel.clear(); this.hover = -1;
+    this._init = true;
+    this._ensureAnim();
     this.draw();
   }
   _seatColor(s) { return this.config.colors?.[s] || ['#e7503a', '#3d7fe0'][s] || '#ccc'; }
 
-  _ensureAnim() {
-    if (this._raf) return;
-    const step = () => {
-      this._raf = null;
-      this.draw();
-      if (now() < this._flashUntil) this._raf = requestAnimationFrame(step);
-    };
-    if (now() < this._flashUntil) this._raf = requestAnimationFrame(step);
+  /* ── Transition detection ───────────────────────────────────────────── */
+  _detectCapture(prev, state) {
+    const before = new Set((prev.table || []).map(key));
+    const after = new Set((state.table || []).map(key));
+    const gone = (prev.table || []).filter((c) => !after.has(key(c)));
+    const grew = (state.capturedCounts || []).some((c, i) => c > (prev.capturedCounts?.[i] ?? 0));
+    if (!gone.length || !grew) return;
+    const seat = state.lastCapturer != null ? state.lastCapturer : this.mySeat;
+    const S = this.css;
+    const prevLayout = this._tableLayout(prev.table || [], S);
+    const target = this._pilePos(seat, S);
+    gone.forEach((c, idx) => {
+      const slot = prevLayout.find((p) => key(p.card) === key(c));
+      const fx = slot ? slot.x + slot.w / 2 : S * 0.5;
+      const fy = slot ? slot.y + slot.h / 2 : S * TABLE_CY;
+      this._flyCards.push({
+        card: c, fx, fy, tx: target.x, ty: target.y, t0: now() + idx * 40, dur: FLY_MS,
+        w: S * 0.10, h: S * 0.14, faceDown: false, accent: this._seatColor(seat),
+        kind: 'capture', pileSeat: seat, arcH: S * 0.05,
+      });
+    });
+    // also flash briefly for emphasis
+    this._flashKeys = new Set(gone.map(key));
+    this._flashUntil = now() + FLASH_MS;
   }
+  _detectSur(prev, state) {
+    for (let s = 0; s < 2; s++) {
+      if ((state.surs?.[s] ?? 0) > (prev.surs?.[s] ?? 0)) {
+        this._surFx = { until: now() + SUR_MS, seat: s };
+        const S = this.css;
+        this._spawnBurst(S * 0.5, S * TABLE_CY, GOLD, 36, 4.5);
+      }
+    }
+  }
+  _detectDeal(prev, state) {
+    if (!state) return;
+    const me = this.mySeat >= 0 ? this.mySeat : 0;
+    const myCount = state.handCounts?.[me] ?? 0;
+    const prevCount = prev?.handCounts?.[me] ?? 0;
+    const isDeal = (!prev && myCount > 0) || (myCount > prevCount);
+    if (!isDeal) return;
+    const S = this.css;
+    const from = { x: S * DECK_SPOT.x, y: S * DECK_SPOT.y };
 
-  _resize() {
-    const rect = this.canvas.getBoundingClientRect();
-    const size = Math.max(rect.width, 240);
-    this.canvas.width = size * this._dpr;
-    this.canvas.height = size * this._dpr;
-    this.css = size;
-    this.draw();
+    // My hand cards fly in (face up), staggered.
+    const handLayout = this._handLayout(state.hands?.[me] || [], S);
+    handLayout.forEach((slot, i) => {
+      this._dealKeys.add(key(slot.card));
+      this._flyCards.push({
+        card: slot.card, fx: from.x, fy: from.y, tx: slot.x + slot.w / 2, ty: slot.y + slot.h / 2,
+        t0: now() + i * DEAL_STAGGER, dur: DEAL_MS, w: slot.w, h: slot.h,
+        faceDown: false, kind: 'deal', arcH: S * 0.04,
+      });
+    });
+    // Table cards fly in (face up) only on the opening deal (no prev).
+    if (!prev) {
+      const tblLayout = this._tableLayout(state.table || [], S);
+      tblLayout.forEach((slot, i) => {
+        this._dealKeys.add(key(slot.card));
+        this._flyCards.push({
+          card: slot.card, fx: from.x, fy: from.y, tx: slot.x + slot.w / 2, ty: slot.y + slot.h / 2,
+          t0: now() + (handLayout.length + i) * DEAL_STAGGER, dur: DEAL_MS, w: slot.w, h: slot.h,
+          faceDown: false, kind: 'deal', arcH: S * 0.04,
+        });
+      });
+    }
+    // Opponent hand backs fly in (face down).
+    const oppSeat = 1 - me;
+    const oppN = state.handCounts?.[oppSeat] ?? 0;
+    const oppLayout = this._oppLayout(oppN, S);
+    oppLayout.forEach((slot, i) => {
+      this._flyCards.push({
+        card: null, fx: from.x, fy: from.y, tx: slot.x + slot.w / 2, ty: slot.y + slot.h / 2,
+        t0: now() + i * DEAL_STAGGER, dur: DEAL_MS, w: slot.w, h: slot.h,
+        faceDown: true, accent: this._seatColor(oppSeat), kind: 'deal-opp', arcH: S * 0.03,
+      });
+    });
   }
 
   /* ── Capture helpers for the staged number card ─────────────────────── */
   _target() { return this.staged ? 11 - fishValue(this.staged.card) : null; }
   _isPicture(card) { return card.r === 11 || card.r === 12 || card.r === 13; }
-  /** Table cards that appear in SOME valid subset for the staged number card. */
   _capturable() {
     if (!this.staged || this._isPicture(this.staged.card)) return new Set();
     const nums = (this.state.table || []).filter((c) => fishValue(c) != null);
@@ -128,6 +212,15 @@ export class PasurRenderer {
       if (c) sum += fishValue(c) || 0;
     }
     return sum;
+  }
+  _pictureTargets() {
+    const card = this.staged.card;
+    const s = new Set();
+    for (const c of (this.state.table || [])) {
+      if (card.r === 11) { if (c.r !== 12 && c.r !== 13) s.add(key(c)); }
+      else if (c.r === card.r) s.add(key(c));
+    }
+    return s;
   }
 
   /* ── Pointer ─────────────────────────────────────────────────────────── */
@@ -154,7 +247,6 @@ export class PasurRenderer {
     if (!this.interactive || !this.state) return;
     const { mx, my } = this._pos(e);
 
-    // Buttons first
     for (const b of this.buttons) {
       if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
         if (b.id === 'play' && b.enabled) this._commit();
@@ -162,7 +254,6 @@ export class PasurRenderer {
         return;
       }
     }
-    // Table cards (toggle selection when a number card is staged)
     const ti = this._hit(this.tableRects, mx, my);
     if (ti >= 0 && this.staged && !this._isPicture(this.staged.card)) {
       const k = this.tableRects[ti].key;
@@ -172,7 +263,6 @@ export class PasurRenderer {
       }
       return;
     }
-    // Hand cards (stage / re-stage)
     const hi = this._hit(this.hand, mx, my);
     if (hi >= 0) {
       const card = this.hand[hi].card;
@@ -187,24 +277,102 @@ export class PasurRenderer {
     const card = this.staged.card;
     let capture = [];
     if (this._isPicture(card)) {
-      capture = []; // engine recomputes the forced capture for J/Q/K
+      capture = [];
     } else {
       const sum = this._selSum();
       if (this.sel.size && sum === this._target()) {
-        capture = [...this.sel].map((k) => {
-          const [s, r] = k.split(',').map(Number); return { s, r };
-        });
+        capture = [...this.sel].map((k) => { const [s, r] = k.split(',').map(Number); return { s, r }; });
       } else if (this.sel.size) {
-        return; // invalid partial selection — ignore
+        return;
       }
     }
     this.onAction?.({ type: 'play', card: { s: card.s, r: card.r }, capture });
     this.staged = null; this.sel.clear();
   }
 
+  /* ── Animation loop ─────────────────────────────────────────────────── */
+  _ensureAnim() {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this._raf = null;
+    const step = () => { this._raf = null; this.draw(); if (this._active()) this._raf = requestAnimationFrame(step); };
+    if (this._active()) this._raf = requestAnimationFrame(step);
+  }
+  _active() {
+    const t = now();
+    if (this._flyCards.some((f) => t < f.t0 + f.dur)) return true;
+    if (this._particles.length) return true;
+    if (t < this._flashUntil) return true;
+    if (t < this._surFx.until) return true;
+    // gentle pulse while it's my turn (glow on playable cards)
+    if (this.interactive && this.state && this.state.turn === this.mySeat && !this.state.winner && !this.state.draw) return true;
+    return false;
+  }
+  _tick() {
+    const t = now();
+    this._flyCards = this._flyCards.filter((f) => t < f.t0 + f.dur);
+    // recompute which deal cards are still in flight (to skip in the static layer)
+    this._dealKeys = new Set(this._flyCards.filter((f) => f.kind === 'deal' && f.card).map((f) => key(f.card)));
+    this._oppFlyCount = this._flyCards.filter((f) => f.kind === 'deal-opp').length;
+  }
+  _pileFlying(seat) { return this._flyCards.filter((f) => f.kind === 'capture' && f.pileSeat === seat && now() < f.t0 + f.dur).length; }
+
+  _resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    const size = Math.max(rect.width, 240);
+    this.canvas.width = size * this._dpr;
+    this.canvas.height = size * this._dpr;
+    this.css = size;
+    this.draw();
+  }
+
+  /* ── Layout geometry (pure — used by both draw and animations) ──────── */
+  _handLayout(cards, S) {
+    if (!cards || !cards.length) return [];
+    const sorted = [...cards].sort((a, b) => (a.s - b.s) || (b.r - a.r));
+    const cw = S * 0.115, ch = cw * 1.4;
+    const maxW = S * 0.86;
+    const spacing = Math.min(cw * 1.06, (maxW - cw) / Math.max(1, sorted.length - 1));
+    const totalW = cw + (sorted.length - 1) * spacing;
+    const startX = (S - totalW) / 2;
+    return sorted.map((card, i) => ({ card, x: startX + i * spacing, y: S * HAND_Y, w: cw, h: ch }));
+  }
+  _tableLayout(cards, S) {
+    if (!cards || !cards.length) return [];
+    const cw = S * 0.108, ch = cw * 1.4, gap = cw * 0.2;
+    const perRow = 6;
+    const rows = Math.ceil(cards.length / perRow);
+    const startY = S * TABLE_CY - (rows * ch + (rows - 1) * (ch * 0.16)) / 2;
+    return cards.map((card, i) => {
+      const row = Math.floor(i / perRow);
+      const inRow = Math.min(cards.length - row * perRow, perRow);
+      const rowW = inRow * cw + (inRow - 1) * gap;
+      const sx = (S - rowW) / 2;
+      const idxInRow = i - row * perRow;
+      const x = sx + idxInRow * (cw + gap);
+      const y = startY + row * (ch + ch * 0.16);
+      return { card, x, y, w: cw, h: ch };
+    });
+  }
+  _oppLayout(count, S) {
+    const cw = S * 0.064, ch = cw * 1.4, gap = cw * 0.46;
+    const shown = Math.min(count, 8);
+    const span = (shown - 1) * gap;
+    const cx = S / 2, cy = S * OPP_CY;
+    const out = [];
+    for (let i = 0; i < shown; i++) out.push({ x: cx - span / 2 + i * gap - cw / 2, y: cy - ch / 2, w: cw, h: ch });
+    return out;
+  }
+  _pilePos(seat, S) {
+    const oppSeat = 1 - (this.mySeat >= 0 ? this.mySeat : 0);
+    const y0 = seat === oppSeat ? S * PILE_OPP_Y : S * PILE_ME_Y;
+    const cw = S * 0.052;
+    return { x: S * PILE_X + cw / 2, y: y0 + S * 0.06 };
+  }
+
   /* ── Render ──────────────────────────────────────────────────────────── */
   draw() {
     const ctx = this.ctx; if (!ctx) return;
+    this._tick();
     const S = this.css;
     ctx.save();
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
@@ -212,11 +380,15 @@ export class PasurRenderer {
     const th = tableTheme(this.config.boardTheme);
     this._rr(0, 0, S, S, 16); ctx.fillStyle = th.edge; ctx.fill();
     this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.06); ctx.fillStyle = th.felt; ctx.fill();
+    // soft vignette for depth
+    const vg = ctx.createRadialGradient(S * 0.5, S * 0.5, S * 0.2, S * 0.5, S * 0.5, S * 0.65);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.28)');
+    this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.06); ctx.fillStyle = vg; ctx.fill();
 
     this.hand = []; this.tableRects = []; this.buttons = [];
     if (!this.state) { ctx.restore(); return; }
     const st = this.state;
-    const oppSeat = 1 - this.mySeat;
+    const oppSeat = 1 - (this.mySeat >= 0 ? this.mySeat : 0);
 
     this._drawInfoBar(ctx, S, st);
     this._drawCapturePiles(ctx, S, st, oppSeat);
@@ -225,153 +397,178 @@ export class PasurRenderer {
     this._drawMyHand(ctx, S, st);
     this._drawControls(ctx, S, st);
 
+    // effects layered on top
+    this._drawFlyCards(ctx, S);
+    this._drawParticles(ctx);
+    if (now() < this._surFx.until) this._drawSur(ctx, S);
+
     ctx.restore();
   }
 
-  /** Physical "won" piles down the left margin that visibly grow as you
-   *  collect برگ — opponent's near the top, yours lower down. */
-  _drawCapturePiles(ctx, S, st, oppSeat) {
-    this._capturePile(ctx, S, S * 0.045, S * 0.16, st.capturedCounts?.[oppSeat] ?? 0, this._seatColor(oppSeat), 'حریف');
-    this._capturePile(ctx, S, S * 0.045, S * 0.50, st.capturedCounts?.[this.mySeat] ?? 0, this._seatColor(this.mySeat), 'تو');
+  /* ── Info bar: three evenly-spaced chips, no overlap ────────────────── */
+  _drawInfoBar(ctx, S, st) {
+    const y = S * INFO_Y, h = S * INFO_H;
+    const x0 = S * 0.05, x1 = S * 0.95, gap = S * 0.018;
+    const cw = (x1 - x0 - 2 * gap) / 3;
+    const mine = st.turn === this.mySeat && !st.winner && !st.draw;
+
+    // chip 1 — magic 11
+    this._chip(ctx, x0, y, cw, h, 'rgba(0,0,0,.42)', 'rgba(255,255,255,.12)');
+    this._chipText(ctx, x0, cw, y, h, GOLD, 'جادو', fa(st.magic ?? 11));
+    // chip 2 — deck remaining
+    this._chip(ctx, x0 + cw + gap, y, cw, h, 'rgba(0,0,0,.42)', 'rgba(255,255,255,.12)');
+    this._chipText(ctx, x0 + cw + gap, cw, y, h, 'rgba(255,255,255,.9)', 'کارت', `🂠 ${fa(st.deckCount ?? 0)}`);
+    // chip 3 — turn
+    const tx = x0 + 2 * (cw + gap);
+    this._chip(ctx, tx, y, cw, h, mine ? 'rgba(91,224,140,.18)' : 'rgba(0,0,0,.42)', mine ? GREEN : 'rgba(255,255,255,.12)');
+    ctx.fillStyle = mine ? GREEN : 'rgba(255,255,255,.8)';
+    ctx.font = `bold ${h * 0.4}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(mine ? '✦ نوبت توست' : 'نوبت حریف', tx + cw / 2, y + h / 2);
   }
-  _capturePile(ctx, S, x, y0, count, accent, label) {
-    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = `bold ${S * 0.023}px sans-serif`;
-    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-    ctx.fillText(`${label}: ${fa(count)}`, x, y0 - S * 0.006);
-    if (!count) return;
-    const cw = S * 0.052, ch = cw * 1.42;
-    const bandH = S * 0.26;
-    const shown = Math.min(count, 30);
-    const step = shown > 1 ? Math.min(ch * 0.16, (bandH - ch) / (shown - 1)) : 0;
-    for (let i = 0; i < shown; i++) {
-      this._cardBack(ctx, x + (i % 2) * 1.5, y0 + i * step, cw, ch, accent);
+  _chip(ctx, x, y, w, h, fill, stroke) {
+    this._rr(x, y, w, h, h * 0.32); ctx.fillStyle = fill; ctx.fill();
+    ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke();
+  }
+  _chipText(ctx, x, w, y, h, valColor, label, val) {
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,255,255,.62)';
+    ctx.font = `${h * 0.32}px sans-serif`;
+    ctx.fillText(label, x + w * 0.12, y + h / 2);
+    ctx.textAlign = 'right'; ctx.fillStyle = valColor;
+    ctx.font = `bold ${h * 0.42}px sans-serif`;
+    ctx.fillText(val, x + w * 0.88, y + h / 2);
+  }
+
+  /* ── Capture piles (left margin, tidy) ──────────────────────────────── */
+  _drawCapturePiles(ctx, S, st, oppSeat) {
+    this._capturePile(ctx, S, S * PILE_X, S * PILE_OPP_Y, Math.max(0, (st.capturedCounts?.[oppSeat] ?? 0) - this._pileFlying(oppSeat)),
+      this._seatColor(oppSeat), 'حریف', st.clubCounts?.[oppSeat] ?? 0, st.surs?.[oppSeat] ?? 0);
+    this._capturePile(ctx, S, S * PILE_X, S * PILE_ME_Y, Math.max(0, (st.capturedCounts?.[this.mySeat] ?? 0) - this._pileFlying(this.mySeat)),
+      this._seatColor(this.mySeat), 'تو', st.clubCounts?.[this.mySeat] ?? 0, st.surs?.[this.mySeat] ?? 0);
+  }
+  _capturePile(ctx, S, x, y0, count, accent, label, clubs, surs) {
+    const cw = S * 0.052, ch = cw * 1.42, bandH = S * 0.155;
+    // header label
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `bold ${S * 0.022}px sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(`${label} · ${fa(count)}`, x, y0 - S * 0.008);
+    // pile of backs
+    if (count) {
+      const shown = Math.min(count, 24);
+      const step = shown > 1 ? Math.min(ch * 0.16, (bandH - ch) / (shown - 1)) : 0;
+      for (let i = 0; i < shown; i++) this._cardBack(ctx, x + (i % 2) * 1.5, y0 + i * step, cw, ch, accent);
+    } else {
+      ctx.save(); ctx.globalAlpha = 0.4;
+      this._rr(x, y0, cw, ch, cw * 0.14); ctx.strokeStyle = 'rgba(255,255,255,.3)';
+      ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.stroke(); ctx.restore();
+    }
+    // club + sur mini-stats under the pile
+    const sy = y0 + bandH + S * 0.018;
+    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = `${S * 0.02}px sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(`♣ ${fa(clubs)}`, x, sy);
+    if (surs > 0) {
+      ctx.fillStyle = GOLD; ctx.font = `bold ${S * 0.02}px sans-serif`;
+      ctx.fillText(`سور ${fa(surs)}`, x, sy + S * 0.026);
     }
   }
 
-  _drawInfoBar(ctx, S, st) {
-    const by = S * 0.045, bh = S * 0.07;
-    // magic 11 + deck count (left)
-    this._rr(S * 0.04, by, S * 0.26, bh, bh * 0.32);
-    ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fill();
-    ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-    ctx.fillStyle = GOLD; ctx.font = `bold ${bh * 0.42}px sans-serif`;
-    ctx.fillText(`جادو: ${fa(11)}`, S * 0.04 + bh * 0.3, by + bh * 0.34);
-    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = `${bh * 0.34}px sans-serif`;
-    ctx.fillText(`🂠 ${fa(st.deckCount ?? 0)} باقی`, S * 0.04 + bh * 0.3, by + bh * 0.72);
-
-    // turn indicator (right)
-    const mine = st.turn === this.mySeat && !st.winner && !st.draw;
-    this._rr(S * 0.62, by, S * 0.34, bh, bh * 0.32);
-    ctx.fillStyle = mine ? 'rgba(91,224,140,.18)' : 'rgba(0,0,0,.4)'; ctx.fill();
-    ctx.strokeStyle = mine ? GREEN : 'rgba(255,255,255,.12)'; ctx.lineWidth = mine ? 1.6 : 0.8; ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = mine ? GREEN : 'rgba(255,255,255,.75)'; ctx.font = `bold ${bh * 0.4}px sans-serif`;
-    ctx.fillText(mine ? '✦ نوبت توست' : 'نوبت حریف', S * 0.62 + S * 0.17, by + bh / 2);
-  }
-
+  /* ── Opponent fan + compact pill ────────────────────────────────────── */
   _drawOpponent(ctx, S, st, oppSeat) {
     const count = st.handCounts?.[oppSeat] ?? 0;
-    const cw = S * 0.066, ch = cw * 1.4, gap = cw * 0.42;
-    const shown = Math.min(count, 8);
-    const span = (shown - 1) * gap;
-    const cx = S / 2, cy = S * 0.18;
-    for (let i = 0; i < shown; i++) {
-      this._cardBack(ctx, cx - span / 2 + i * gap - cw / 2, cy - ch / 2, cw, ch, this._seatColor(oppSeat));
+    const layout = this._oppLayout(count, S);
+    const drawN = Math.max(0, layout.length - this._oppFlyCount);
+    const active = st.turn === oppSeat && !st.winner && !st.draw;
+    for (let i = 0; i < drawN; i++) {
+      const slot = layout[i];
+      this._cardBack(ctx, slot.x, slot.y, slot.w, slot.h, this._seatColor(oppSeat));
     }
-    // opponent stats pill
-    const pw = S * 0.5, ph = S * 0.045, px = (S - pw) / 2, py = cy + ch / 2 + S * 0.014;
-    this._rr(px, py, pw, ph, ph / 2); ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `${ph * 0.56}px sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(`حریف · 🃏 ${fa(st.capturedCounts?.[oppSeat] ?? 0)} برگ · ♣ ${fa(st.clubCounts?.[oppSeat] ?? 0)} · سور ${fa(st.surs?.[oppSeat] ?? 0)}`, S / 2, py + ph / 2);
+    // compact pill: just name + turn dot (detailed stats live by the pile now)
+    const pw = S * 0.34, ph = S * 0.044, px = (S - pw) / 2, py = S * OPP_PILL_Y;
+    this._rr(px, py, pw, ph, ph / 2);
+    ctx.fillStyle = active ? 'rgba(255,215,107,.14)' : 'rgba(0,0,0,.5)'; ctx.fill();
+    ctx.strokeStyle = active ? GOLD : 'rgba(255,255,255,.12)'; ctx.lineWidth = active ? 1.4 : 0.8; ctx.stroke();
+    ctx.fillStyle = active ? GOLD : 'rgba(255,255,255,.82)';
+    ctx.font = `${ph * 0.5}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(`${active ? '● ' : ''}حریف · ${fa(count)} کارت`, S / 2, py + ph / 2);
   }
 
+  /* ── Table cards ────────────────────────────────────────────────────── */
   _drawTable(ctx, S, st) {
     const cards = st.table || [];
-    const cw = S * 0.115, ch = cw * 1.4;
+    const layout = this._tableLayout(cards, S);
     const capset = this.staged && !this._isPicture(this.staged.card) ? this._capturable() : null;
     const pictureCap = this.staged && this._isPicture(this.staged.card) ? this._pictureTargets() : null;
     const flashing = now() < this._flashUntil;
 
-    // Lay out in up to two centred rows.
-    const perRow = Math.min(cards.length, 6) || 1;
-    const rows = Math.ceil(cards.length / 6) || 1;
-    const startY = S * 0.42 - (rows - 1) * (ch * 0.55);
-    cards.forEach((card, i) => {
-      const row = Math.floor(i / 6);
-      const inRow = Math.min(cards.length - row * 6, 6);
-      const rowW = inRow * cw + (inRow - 1) * (cw * 0.18);
-      const sx = (S - rowW) / 2;
-      const idxInRow = i - row * 6;
-      const x = sx + idxInRow * (cw + cw * 0.18);
-      const y = startY + row * (ch * 1.12);
-      this.tableRects.push({ key: key(card), x, y, w: cw, h: ch, card });
-
+    if (!cards.length) {
+      ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.font = `${S * 0.032}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('میز خالی است', S / 2, S * TABLE_CY);
+      return;
+    }
+    for (const slot of layout) {
+      const { card, x, y, w, h } = slot;
+      this.tableRects.push({ key: key(card), x, y, w, h, card });
+      if (this._dealKeys.has(key(card))) continue; // still flying in
       const k = key(card);
       const selected = this.sel.has(k);
       const dim = capset ? !capset.has(k) && !selected : (pictureCap ? !pictureCap.has(k) : false);
       const willTake = (pictureCap && pictureCap.has(k)) || selected;
       const flash = flashing && this._flashKeys.has(k);
 
-      this._cardFace(ctx, x, y, cw, ch, card, dim);
-      if (flash) { this._cardOutline(ctx, x, y, cw, ch, GOLD, 3); }
-      else if (willTake) { this._cardOutline(ctx, x, y, cw, ch, GREEN, 3); }
-      else if (capset && capset.has(k)) { this._cardOutline(ctx, x, y, cw, ch, 'rgba(91,224,140,.55)', 2); }
-    });
-    if (!cards.length) {
-      ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = `${S * 0.035}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('میز خالی است', S / 2, S * 0.45);
+      this._cardFace(ctx, x, y, w, h, card, dim);
+      if (flash) this._cardOutline(ctx, x, y, w, h, GOLD, 3);
+      else if (willTake) this._cardOutline(ctx, x, y, w, h, GREEN, 3);
+      else if (capset && capset.has(k)) this._cardOutline(ctx, x, y, w, h, 'rgba(91,224,140,.55)', 2);
     }
   }
 
-  /** For a staged picture card, which table cards it will take (highlight). */
-  _pictureTargets() {
-    const card = this.staged.card;
-    const s = new Set();
-    for (const c of (this.state.table || [])) {
-      if (card.r === 11) { if (c.r !== 12 && c.r !== 13) s.add(key(c)); }
-      else if (c.r === card.r) s.add(key(c)); // Q/K match
-    }
-    return s;
-  }
-
+  /* ── My hand (with playable glow) ───────────────────────────────────── */
   _drawMyHand(ctx, S, st) {
     const cards = st.hands?.[this.mySeat];
-    const cw = S * 0.12, ch = cw * 1.4;
-    const baseY = S * 0.70;
+    const baseY = S * HAND_Y;
     if (!cards || !cards.length) {
       ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = `${S * 0.03}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('در انتظار پخش دست بعد…', S / 2, baseY + ch / 2);
+      ctx.fillText('در انتظار پخش دست بعد…', S / 2, baseY + S * 0.08);
       return;
     }
-    const sorted = [...cards].sort((a, b) => (a.s - b.s) || (b.r - a.r));
-    const maxW = S * 0.9;
-    const spacing = Math.min(cw * 1.04, (maxW - cw) / Math.max(1, sorted.length - 1));
-    const totalW = cw + (sorted.length - 1) * spacing;
-    const startX = (S - totalW) / 2;
-    sorted.forEach((card, i) => {
+    const layout = this._handLayout(cards, S);
+    const myTurn = st.turn === this.mySeat && !st.winner && !st.draw && this.interactive;
+    const pulse = 0.5 + 0.5 * Math.sin(now() / 300);
+    layout.forEach((slot, i) => {
+      const card = slot.card;
+      if (this._dealKeys.has(key(card))) { this.hand.push({ card, x: slot.x, y: slot.y, w: slot.w, h: slot.h }); return; }
       const staged = this.staged && key(this.staged.card) === key(card);
       const lift = staged ? S * 0.05 : (this.hover === i ? S * 0.025 : 0);
-      const x = startX + i * spacing, y = baseY - lift;
+      const x = slot.x, y = slot.y - lift, cw = slot.w, ch = slot.h;
       this.hand.push({ card, x, y, w: cw, h: ch });
+      // playable glow (pulsing halo) on my turn
+      if (myTurn && !staged) {
+        ctx.save();
+        ctx.shadowColor = GREEN; ctx.shadowBlur = 10 + 8 * pulse;
+        this._rr(x, y, cw, ch, cw * 0.12); ctx.strokeStyle = `rgba(91,224,140,${0.35 + 0.25 * pulse})`;
+        ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+      }
       this._cardFace(ctx, x, y, cw, ch, card, false);
       if (staged) this._cardOutline(ctx, x, y, cw, ch, GOLD, 3);
     });
   }
 
+  /* ── My stats strip + play/cancel controls ──────────────────────────── */
   _drawControls(ctx, S, st) {
-    // My stats strip (always shown)
-    const sy = S * 0.90;
-    ctx.fillStyle = 'rgba(255,255,255,.82)'; ctx.font = `${S * 0.03}px sans-serif`;
+    // always-on stats strip (own line, clear of the hand and buttons)
+    const sy = S * STRIP_Y;
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `${S * 0.028}px sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(`تو · 🃏 ${fa(st.capturedCounts?.[this.mySeat] ?? 0)} برگ · ♣ ${fa(st.clubCounts?.[this.mySeat] ?? 0)} · سور ${fa(st.surs?.[this.mySeat] ?? 0)}`, S / 2, sy);
+    ctx.fillText(
+      `تو · 🃏 ${fa(st.capturedCounts?.[this.mySeat] ?? 0)} برگ · ♣ ${fa(st.clubCounts?.[this.mySeat] ?? 0)} · سور ${fa(st.surs?.[this.mySeat] ?? 0)}`,
+      S / 2, sy);
 
     if (!this.staged || !this.interactive) return;
     const card = this.staged.card;
-
-    // Hint + Play/Cancel buttons
     let hint, canPlay;
     if (this._isPicture(card)) {
       const tgt = this._pictureTargets();
@@ -383,30 +580,29 @@ export class PasurRenderer {
       const cur = sum + fishValue(card);
       if (this.sel.size === 0) {
         const has = this._capturable().size > 0;
-        hint = has ? `${cardName(card)} — برگ‌هایی را انتخاب کن که با کارتت ۱۱ شوند` : `برداشتی ممکن نیست — روی میز گذاشته می‌شود`;
-        canPlay = true; // lay down
+        hint = has ? 'برگ‌هایی را انتخاب کن که با کارتت ۱۱ شوند' : 'برداشتی ممکن نیست — روی میز گذاشته می‌شود';
+        canPlay = true;
       } else {
         hint = `جمع: ${fa(cur)} از ${fa(11)}` + (cur === 11 ? ' ✓' : '');
         canPlay = cur === 11;
       }
     }
 
-    const bw = S * 0.26, bh = S * 0.082, gap = S * 0.03;
-    const bx = S / 2 - bw - gap / 2, cx = S / 2 + gap / 2, byb = S * 0.935 - bh;
-    // hint above buttons
+    // hint on its own line above the buttons
     ctx.fillStyle = canPlay ? GREEN : 'rgba(255,210,120,.95)';
-    ctx.font = `${S * 0.028}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-    ctx.fillText(hint, S / 2, byb - S * 0.012);
+    ctx.font = `${S * 0.027}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(hint, S / 2, S * 0.862);
 
-    // Play button
+    const bw = S * 0.26, bh = S * 0.072, gap = S * 0.03;
+    const bx = S / 2 - bw - gap / 2, cx = S / 2 + gap / 2, byb = S * 0.885;
+    // Play
     this._rr(bx, byb, bw, bh, bh * 0.3);
     ctx.fillStyle = canPlay ? GREEN : 'rgba(120,140,130,.4)'; ctx.fill();
     ctx.fillStyle = canPlay ? '#06231a' : 'rgba(255,255,255,.5)';
     ctx.font = `bold ${bh * 0.42}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('بازی کن ✓', bx + bw / 2, byb + bh / 2);
     this.buttons.push({ id: 'play', x: bx, y: byb, w: bw, h: bh, enabled: canPlay });
-
-    // Cancel button
+    // Cancel
     this._rr(cx, byb, bw, bh, bh * 0.3);
     ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1; ctx.stroke();
@@ -415,7 +611,68 @@ export class PasurRenderer {
     this.buttons.push({ id: 'cancel', x: cx, y: byb, w: bw, h: bh, enabled: true });
   }
 
-  /* ── Card art ───────────────────────────────────────────────────────── */
+  /* ── Effects: flying cards, particles, sur ──────────────────────────── */
+  _drawFlyCards(ctx, S) {
+    const t = now();
+    for (const f of this._flyCards) {
+      const dt = t - f.t0;
+      if (dt < 0 || dt >= f.dur) continue;
+      const raw = dt / f.dur, e = 1 - Math.pow(1 - raw, 3);
+      const cpx = (f.fx + f.tx) / 2, cpy = (f.fy + f.ty) / 2 - (f.arcH || 0);
+      const bx = (1 - e) * (1 - e) * f.fx + 2 * (1 - e) * e * cpx + e * e * f.tx;
+      const by = (1 - e) * (1 - e) * f.fy + 2 * (1 - e) * e * cpy + e * e * f.ty;
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 12 * (1 - e) + 3;
+      if (f.faceDown) this._cardBack(ctx, -f.w / 2, -f.h / 2, f.w, f.h, f.accent);
+      else this._cardFace(ctx, -f.w / 2, -f.h / 2, f.w, f.h, f.card, false);
+      ctx.restore();
+    }
+  }
+  _spawnBurst(x, y, color, n, speed = 3) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 0.8 + Math.random() * speed;
+      this._particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.8, life: 1, color, r: 2 + Math.random() * 3 });
+    }
+  }
+  _drawParticles(ctx) {
+    if (!this._particles.length) return;
+    const alive = [];
+    for (const p of this._particles) {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life -= 0.026;
+      if (p.life > 0) {
+        alive.push(p);
+        ctx.save(); ctx.globalAlpha = Math.max(0, p.life);
+        ctx.shadowColor = p.color; ctx.shadowBlur = 8; ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      }
+    }
+    this._particles = alive;
+  }
+  _drawSur(ctx, S) {
+    const left = this._surFx.until - now();
+    const t = 1 - Math.max(0, left / SUR_MS);
+    const e = 1 - Math.pow(1 - t, 3);
+    const alpha = t < 0.75 ? 1 : 1 - (t - 0.75) / 0.25;
+    const who = this._surFx.seat === this.mySeat ? 'سورِ تو!' : 'سورِ حریف!';
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    // expanding gold ring
+    ctx.beginPath(); ctx.arc(S / 2, S * TABLE_CY, S * (0.06 + e * 0.32), 0, Math.PI * 2);
+    ctx.strokeStyle = GOLD; ctx.lineWidth = 6 * (1 - e) + 1; ctx.shadowColor = GOLD; ctx.shadowBlur = 24 * (1 - e) + 6;
+    ctx.stroke();
+    // big text
+    ctx.fillStyle = GOLD; ctx.shadowBlur = 20;
+    ctx.font = `bold ${S * (0.07 + e * 0.04)}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('✦ سور ✦', S / 2, S * TABLE_CY - S * 0.03);
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.font = `bold ${S * 0.04}px sans-serif`;
+    ctx.fillText(who, S / 2, S * TABLE_CY + S * 0.05);
+    ctx.restore();
+  }
+
+  /* ── Card art (style-aware: classic / royal / dark) ─────────────────── */
   _cardFace(ctx, x, y, w, h, card, dim) {
     const style = this.config?.cardStyle || 'classic';
     const r = w * 0.12;
@@ -430,7 +687,7 @@ export class PasurRenderer {
       ctx.fillStyle = '#dde0f0'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = `bold ${h * 0.22}px sans-serif`;
       ctx.fillText(rankLabel(card.r), x + w * 0.09, y + h * 0.05);
-      ctx.fillStyle = col; ctx.shadowBlur = dim ? 0 : 7;
+      ctx.fillStyle = col;
       ctx.font = `${h * 0.20}px serif`;
       ctx.fillText(SUIT[card.s], x + w * 0.09, y + h * 0.28);
       ctx.font = `${h * 0.40}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -458,7 +715,6 @@ export class PasurRenderer {
       ctx.fillText(SUIT[card.s], w * 0.09, h * 0.24);
       ctx.restore();
     } else {
-      // classic
       this._rr(x, y, w, h, r);
       ctx.fillStyle = dim ? '#d9d6cd' : '#fbfaf6'; ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 1; ctx.stroke();
@@ -492,17 +748,14 @@ export class PasurRenderer {
     } else if (style === 'royal') {
       this._rr(x, y, w, h, r); ctx.fillStyle = accent || '#1a2a4a'; ctx.fill();
       ctx.strokeStyle = 'rgba(255,230,160,.6)'; ctx.lineWidth = 1.5; ctx.stroke();
-      ctx.save(); ctx.clip();
+      ctx.save(); this._rr(x, y, w, h, r); ctx.clip();
       ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
-      for (let d = -h; d < w + h; d += w * 0.22) {
-        ctx.beginPath(); ctx.moveTo(x + d, y); ctx.lineTo(x + d + h, y + h); ctx.stroke();
-      }
+      for (let d = -h; d < w + h; d += w * 0.22) { ctx.beginPath(); ctx.moveTo(x + d, y); ctx.lineTo(x + d + h, y + h); ctx.stroke(); }
       ctx.restore();
       ctx.fillStyle = 'rgba(255,230,160,.55)';
       ctx.font = `${h * 0.30}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('✦', x + w / 2, y + h / 2);
     } else {
-      // classic
       this._rr(x, y, w, h, r); ctx.fillStyle = '#1e2a3a'; ctx.fill();
       ctx.strokeStyle = accent || '#3a7a'; ctx.lineWidth = 1.5; ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,.09)';
