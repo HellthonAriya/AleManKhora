@@ -134,25 +134,33 @@ export class BackgammonRenderer {
   }
   _turnKey(st) { return `${st.turn}:${st.moveCount}`; }
 
+  /** Expire finished animations. Called at the start of EVERY draw so the board
+   *  converges to the correct settled state even if the rAF loop never runs
+   *  (e.g. a frame was dropped while the tab was backgrounded). */
+  _tickAnims() {
+    const t = now();
+    if (this._anim && t - this._anim.t0 >= MOVE_MS) this._anim = null;
+    if (this._hitAnim && t - this._hitAnim.t0 >= MOVE_MS) this._hitAnim = null;
+  }
+  _animActive() {
+    if (this._anim || this._hitAnim) return true;
+    if (this._particles.length) return true;
+    if (now() < this._diceUntil) return true;
+    if (this.interactive && (this.sel != null || this._needRoll())) return true; // pulse
+    return false;
+  }
   _ensureAnim() {
-    if (this._raf) return;
-    const active = () => {
-      const t = now();
-      if (this._anim || this._hitAnim) return true;
-      if (this._particles.length) return true;
-      if (t < this._diceUntil) return true;
-      if (this.interactive && (this.sel != null || this._needRoll())) return true; // pulse
-      return false;
-    };
+    // Always cancel any pending frame and reschedule — never trust a stale _raf
+    // id (a backgrounded tab can leave one that never fires and would otherwise
+    // block every future loop, freezing the board mid-animation).
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this._raf = null;
     const step = () => {
       this._raf = null;
-      const t = now();
-      if (this._anim && t - this._anim.t0 >= MOVE_MS) this._anim = null;
-      if (this._hitAnim && t - this._hitAnim.t0 >= MOVE_MS) this._hitAnim = null;
-      this.draw();
-      if (active()) this._raf = requestAnimationFrame(step);
+      this.draw(); // draw() ticks/expires animations itself
+      if (this._animActive()) this._raf = requestAnimationFrame(step);
     };
-    if (active()) this._raf = requestAnimationFrame(step);
+    if (this._animActive()) this._raf = requestAnimationFrame(step);
   }
 
   /* ------------------------------ Geometry ------------------------------- */
@@ -283,6 +291,7 @@ export class BackgammonRenderer {
   /* ------------------------------ Render --------------------------------- */
   draw() {
     const ctx = this.ctx; if (!ctx) return;
+    this._tickAnims(); // self-heal: expire stale animations even without the loop
     const g = this._geo();
     ctx.save();
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
