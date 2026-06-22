@@ -209,6 +209,17 @@ export const Games = {
     return db.prepare('SELECT * FROM games ORDER BY created_at DESC LIMIT ? OFFSET ?')
       .all(limit, offset);
   },
+  /** Season leaderboard: most wins among games finished since `sinceTs`. */
+  seasonLeaderboard(sinceTs, limit = 100) {
+    return db.prepare(
+      `SELECT u.id, u.username, u.avatar_color AS avatarColor, COUNT(*) AS wins
+         FROM games g JOIN users u ON u.id = g.winner_id
+        WHERE g.status = 'finished' AND g.winner_id IS NOT NULL
+          AND g.finished_at >= ? AND u.is_banned = 0
+        GROUP BY g.winner_id
+        ORDER BY wins DESC LIMIT ?`
+    ).all(sinceTs, limit);
+  },
   stats() {
     const total = db.prepare('SELECT COUNT(*) n FROM games').get().n;
     const finished = db.prepare("SELECT COUNT(*) n FROM games WHERE status='finished'").get().n;
@@ -259,6 +270,17 @@ export const GameStats = {
     return db.prepare(
       'SELECT game_type, played, wins, losses, draws, rating FROM game_stats WHERE user_id=? ORDER BY played DESC'
     ).all(userId);
+  },
+
+  /** Per-game leaderboard ranked by that game's rating, then wins. */
+  leaderboard(gameType, limit = 100) {
+    return db.prepare(
+      `SELECT u.id, u.username, u.avatar_color AS avatarColor,
+              gs.rating, gs.played AS gamesPlayed, gs.wins, gs.losses, gs.draws
+         FROM game_stats gs JOIN users u ON u.id = gs.user_id
+        WHERE gs.game_type = ? AND u.is_banned = 0 AND gs.played > 0
+        ORDER BY gs.rating DESC, gs.wins DESC LIMIT ?`
+    ).all(gameType, limit);
   },
 
   /**

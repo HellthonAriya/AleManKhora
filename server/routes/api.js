@@ -144,9 +144,24 @@ router.post('/profile/password', requireUser, async (req, res) => {
 
 /* ---------------------------- Leaderboard --------------------------------- */
 
+const LEADERBOARD_GAMES = ['quoridor', 'chess', 'chess4', 'chesszade', 'hokm', 'pasur', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'];
+
 router.get('/leaderboard', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 200);
-  res.json({ leaderboard: Users.leaderboard(limit) });
+  const game = req.query.game;
+  // Per-game board (ranked by that game's rating).
+  if (game && LEADERBOARD_GAMES.includes(game)) {
+    return res.json({ scope: 'game', game, leaderboard: GameStats.leaderboard(game, limit) });
+  }
+  // Monthly season board (most wins this calendar month).
+  if (req.query.scope === 'season') {
+    const now = new Date();
+    const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    const season = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    return res.json({ scope: 'season', season, leaderboard: Games.seasonLeaderboard(monthStart, limit) });
+  }
+  // Default: overall ELO board.
+  res.json({ scope: 'overall', leaderboard: Users.leaderboard(limit) });
 });
 
 export default router;
