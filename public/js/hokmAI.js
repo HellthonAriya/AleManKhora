@@ -34,6 +34,29 @@ function pickRandom(moves) {
   return moves[Math.floor(Math.random() * moves.length)];
 }
 
+/**
+ * Maintain a per-game memory of every card the AI has seen played. The engine
+ * keeps no global play log, so we rebuild it from the live trick and the last
+ * completed trick on every call. A card seen here is guaranteed off the table.
+ */
+function rememberSeen(game) {
+  if (!game._hokmSeen) game._hokmSeen = new Set();
+  const add = (t) => { if (t && t.card) game._hokmSeen.add(t.card.s + '-' + t.card.r); };
+  for (const t of game.trick || []) add(t);
+  for (const t of game.lastTrick || []) add(t);
+  return game._hokmSeen;
+}
+
+/**
+ * Highest rank in `suit` that has NOT been seen played (so it's still live,
+ * either in my hand or someone else's). A card whose rank equals this is the
+ * current "boss" of that suit.
+ */
+function liveBossRank(suit, seen) {
+  for (let r = 14; r >= 2; r--) if (!seen.has(suit + '-' + r)) return r;
+  return 0;
+}
+
 export function chooseHokmAction(game, seat, difficulty = 'normal') {
   try {
     if (!game) return null;
@@ -53,6 +76,7 @@ export function chooseHokmAction(game, seat, difficulty = 'normal') {
 
     if (difficulty === 'easy') return pickRandom(moves);
 
+    const seen = rememberSeen(game);
     const trump = game.trump;
     const ledSuit = game.ledSuit;
     const cards = moves.map((m) => m.card);
@@ -70,6 +94,18 @@ export function chooseHokmAction(game, seat, difficulty = 'normal') {
     // ---- Leading (empty trick) ----
     if (game.trick.length === 0) {
       const nonTrump = cards.filter((c) => !isTrump(c));
+      // Hard: lead a guaranteed-winner ("boss") of a non-trump suit if we hold
+      // one — no higher card of that suit is still live, so it pulls the trick
+      // (barring a trump from a void opponent). Prefer the boss in our longest
+      // suit to flush opponents' cards.
+      if (difficulty === 'hard' && nonTrump.length) {
+        const bosses = nonTrump.filter((c) => c.r === liveBossRank(c.s, seen));
+        if (bosses.length) {
+          const lenOf = (s) => nonTrump.filter((c) => c.s === s).length;
+          bosses.sort((a, b) => lenOf(b.s) - lenOf(a.s) || b.r - a.r);
+          return toAction(bosses[0]);
+        }
+      }
       // Lead an Ace of a non-trump suit if held.
       const aces = nonTrump.filter((c) => c.r === 14);
       if (aces.length) return toAction(highest(aces));
