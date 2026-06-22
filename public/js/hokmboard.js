@@ -582,10 +582,16 @@ export class HokmRenderer {
   /* ── Graphical trick-pile stacks ─────────────────────────────────────── */
   _drawTrickPiles(ctx, S, H, st, place) {
     const now = ts();
-    // Cards still flying toward a pile must NOT be counted yet — the tally only
-    // grows once the animation lands, so a winning trick "arrives" before it's added.
-    const flying = (pred) => this._trickPileAnims.reduce(
-      (n, a) => (now < a.t0 + a.dur && pred(a.winner) ? n + 1 : n), 0);
+    // A trick must NOT appear in the tally until its collect animation lands.
+    // This covers both: cards still flying AND the hold period before the
+    // animation even fires (_pendingCollect).
+    const pendingWinner = this._pendingCollect?.winner ?? null;
+    const flying = (pred) => {
+      let n = this._trickPileAnims.reduce(
+        (acc, a) => (now < a.t0 + a.dur && pred(a.winner) ? acc + 1 : acc), 0);
+      if (pendingWinner != null && pred(pendingWinner)) n++;
+      return n;
+    };
 
     if (st.teams && st.numPlayers > 2) {
       // Team mode — one shared pile per team, teammates' tricks combined
