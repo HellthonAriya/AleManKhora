@@ -508,7 +508,8 @@ export function GameView(roomId) {
       if (isChess && numPlayers === 2) {
         card.append(h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:6px', onclick: offerDraw }, '🤝 پیشنهاد مساوی'));
       }
-      card.append(h('button', { class: 'btn btn-danger btn-sm btn-block', style: 'margin-top:10px', onclick: doResign }, '🏳 تسلیم'));
+      card.append(h('button', { class: 'btn btn-danger btn-sm btn-block', style: 'margin-top:10px', onclick: doResign },
+        series ? '🏳 تسلیم این بازی' : '🏳 تسلیم'));
       controlsMount.append(card);
     } else if (status === 'finished') {
       const canRematch = !spectator && (aiSeats.length > 0 || players.filter((p) => p && !p.isAI).length >= 1);
@@ -639,7 +640,10 @@ export function GameView(roomId) {
     toast(ok ? 'لینک دعوت کپی شد' : 'کپی نشد — دستی انتخاب کن', ok ? 'success' : 'error');
   }
   async function doResign() {
-    if (await confirmDialog('تسلیم شدن', 'مطمئنی می‌خواهی تسلیم شوی؟', { danger: true, confirmLabel: 'تسلیم' })) socket.emit('game:resign');
+    const msg = series
+      ? 'این بازیِ لیگ را واگذار می‌کنی و به بازی بعد می‌روید. مطمئنی؟'
+      : 'مطمئنی می‌خواهی تسلیم شوی؟';
+    if (await confirmDialog('تسلیم شدن', msg, { danger: true, confirmLabel: 'تسلیم' })) socket.emit('game:resign');
   }
   function offerDraw() {
     if (drawWaitModal) { toast('یک پیشنهاد مساوی در جریان است', 'error'); return; }

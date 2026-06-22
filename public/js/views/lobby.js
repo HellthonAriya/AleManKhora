@@ -19,6 +19,13 @@ const GAMES = [
 ];
 function gameLabel(id) { const g = GAMES.find((x) => x.id === id); return g ? `${g.icon} ${g.name}` : id; }
 
+/** How many seats a (game, config) has — drives the max bots you can add. */
+function seatsForConfig(cfg) {
+  if (cfg.gameType === 'hokm') return Number(cfg.variant) || 2;
+  if (cfg.gameType === 'chess4') return 4;
+  return Number(cfg.players) || 2;
+}
+
 // Which games can appear in an N-player league (mirrors the server).
 const SERIES_GAMES = {
   2: ['quoridor', 'chess', 'chesszade', 'hokm', 'pasur', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'],
@@ -178,11 +185,25 @@ export function LobbyView() {
     let bots = 0;
     let botDifficulty = store.config?.aiDifficulty || 'normal';
     const botSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
-    [['۰', 0], ['۱', 1], ['۲', 2], ['۳', 3]].forEach(([l, v]) => {
-      const b = h('button', { class: v === bots ? 'active' : '' }, l);
-      b.addEventListener('click', () => { bots = v; [...botSeg.children].forEach((x) => x.classList.toggle('active', x === b)); diffWrap.style.display = bots > 0 ? '' : 'none'; });
-      botSeg.append(b);
-    });
+    const botHint = h('p', { class: 'faint', style: 'margin-top:6px' });
+    // The number of bots you can add depends on the game's seat count, which can
+    // change inside the customizer (Hokm variant / Quoridor players). Rebuild the
+    // 0..(seats-1) options whenever the customizer is touched.
+    function refreshBots() {
+      const seats = seatsForConfig({ ...customizer.getConfig(), gameType });
+      const max = Math.max(0, seats - 1);
+      if (bots > max) bots = max;
+      botSeg.innerHTML = '';
+      for (let v = 0; v <= max; v++) {
+        const b = h('button', { class: v === bots ? 'active' : '' }, faNum(v));
+        b.addEventListener('click', () => { bots = v; [...botSeg.children].forEach((x, i) => x.classList.toggle('active', i === v)); diffWrap.style.display = bots > 0 ? '' : 'none'; });
+        botSeg.append(b);
+      }
+      botHint.textContent = max === 0
+        ? 'این بازی صندلی خالی برای بات ندارد.'
+        : `این بازی ${faNum(seats)} نفره است — تا ${faNum(max)} بات می‌توانی اضافه کنی؛ بقیه را دوستانت با کد پر می‌کنند.`;
+      diffWrap.style.display = bots > 0 ? '' : 'none';
+    }
     const diffSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
     [['easy', 'آسان'], ['normal', 'متوسط'], ['hard', 'سخت']].forEach(([v, l]) => {
       const b = h('button', { class: v === botDifficulty ? 'active' : '' }, l);
@@ -190,13 +211,14 @@ export function LobbyView() {
       diffSeg.append(b);
     });
     const diffWrap = h('div', { class: 'opt-group', style: 'display:none' }, h('label', {}, 'سطح سختی بات‌ها'), diffSeg);
+    customizer.element.addEventListener('click', () => setTimeout(refreshBots, 0));
+    refreshBots();
     modal({
       title: `${gameLabel(gameType)} — ساخت اتاق خصوصی`,
       body: h('div', {},
         customizer.element,
         h('div', { class: 'opt-group' }, h('label', {}, '🤖 پر کردن صندلی‌ها با بات'),
-          botSeg,
-          h('p', { class: 'faint', style: 'margin-top:6px' }, 'صندلی‌های خالی با بات پر می‌شوند؛ بقیه را دوستانت با کد پر می‌کنند.')),
+          botSeg, botHint),
         diffWrap),
       actions: [
         { label: 'انصراف', class: 'btn-ghost' },
@@ -265,28 +287,36 @@ export function LobbyView() {
       });
     }
 
+    const botSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    const botHint = h('p', { class: 'faint', style: 'margin-top:6px' });
+    // Bots can fill at most (players - 1) seats; rebuild when player count changes.
+    function refreshBots() {
+      const max = Math.max(0, players - 1);
+      if (bots > max) bots = max;
+      botSeg.innerHTML = '';
+      for (let v = 0; v <= max; v++) {
+        const b = h('button', { class: v === bots ? 'active' : '' }, faNum(v));
+        b.addEventListener('click', () => { bots = v; [...botSeg.children].forEach((x, i) => x.classList.toggle('active', i === v)); });
+        botSeg.append(b);
+      }
+      botHint.textContent = `لیگ ${faNum(players)} نفره — تا ${faNum(max)} بات می‌توانی اضافه کنی.`;
+    }
+
     const playerSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
     [['۲ نفره', 2], ['۳ نفره', 3], ['۴ نفره', 4]].forEach(([l, v]) => {
       const b = h('button', { class: v === players ? 'active' : '' }, l);
-      b.addEventListener('click', () => { players = v; playlist = []; [...playerSeg.children].forEach((x) => x.classList.toggle('active', x === b)); renderAvail(); renderChosen(); });
+      b.addEventListener('click', () => { players = v; playlist = []; [...playerSeg.children].forEach((x) => x.classList.toggle('active', x === b)); renderAvail(); renderChosen(); refreshBots(); });
       playerSeg.append(b);
     });
 
-    const botSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
-    [['۰', 0], ['۱', 1], ['۲', 2], ['۳', 3]].forEach(([l, v]) => {
-      const b = h('button', { class: v === bots ? 'active' : '' }, l);
-      b.addEventListener('click', () => { bots = v; [...botSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
-      botSeg.append(b);
-    });
-
-    renderAvail(); renderChosen();
+    renderAvail(); renderChosen(); refreshBots();
     modal({
       title: '🏆 ساخت لیگ چندبازیه',
       body: h('div', {},
         h('div', { class: 'opt-group' }, h('label', {}, 'تعداد بازیکنان'), playerSeg),
         h('div', { class: 'opt-group' }, h('label', {}, 'بازی‌های موجود (به ترتیب اضافه کن)'), availMount),
         h('div', { class: 'opt-group' }, h('label', {}, 'فهرست لیگ'), chosenMount),
-        h('div', { class: 'opt-group' }, h('label', {}, '🤖 پر کردن صندلی‌ها با بات'), botSeg),
+        h('div', { class: 'opt-group' }, h('label', {}, '🤖 پر کردن صندلی‌ها با بات'), botSeg, botHint),
       ),
       actions: [
         { label: 'انصراف', class: 'btn-ghost' },

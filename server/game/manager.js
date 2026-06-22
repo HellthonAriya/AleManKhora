@@ -724,7 +724,7 @@ export class GameManager {
       reason: endReason,
       elo: eloResult,
       gameElo,
-      series: this.seriesView ? room.seriesView() : null,
+      series: room.seriesView(),
       clock: room.clockView(),
       state: room.game.toState(),
     });
