@@ -268,6 +268,14 @@ export function registerSocket(io, manager) {
       });
     });
 
+    /* ------------------------- Spectator predictions --------------------- */
+    socket.on('predict:set', ({ seat } = {}, cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room) return cb?.({ ok: false });
+      if (!manager.setPrediction(room, socket, seat)) return cb?.({ ok: false });
+      cb?.({ ok: true });
+    });
+
     /* ------------------------------- Chat -------------------------------- */
     socket.on('chat:message', ({ text } = {}) => {
       const room = manager.getRoom(socket.data.roomId);

@@ -7,7 +7,8 @@ import db from './db.js';
 /* ------------------------------- Users ----------------------------------- */
 
 const publicUserCols = `id, username, email, is_admin, is_banned, elo,
-  games_played, wins, losses, draws, avatar_color, prefs, created_at, last_seen`;
+  games_played, wins, losses, draws, avatar_color, prefs, created_at, last_seen,
+  pred_total, pred_correct`;
 
 function shapeUser(row) {
   if (!row) return null;
@@ -26,6 +27,8 @@ function shapeUser(row) {
     prefs: safeParse(row.prefs, {}),
     createdAt: row.created_at,
     lastSeen: row.last_seen,
+    predTotal: row.pred_total || 0,
+    predCorrect: row.pred_correct || 0,
   };
 }
 
@@ -62,6 +65,11 @@ export const Users = {
   },
   touch(id) {
     db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').run(Date.now(), id);
+  },
+  recordPrediction(id, correct) {
+    if (!id) return;
+    db.prepare('UPDATE users SET pred_total = pred_total + 1, pred_correct = pred_correct + ? WHERE id = ?')
+      .run(correct ? 1 : 0, id);
   },
   updatePrefs(id, prefs) {
     db.prepare('UPDATE users SET prefs = ? WHERE id = ?').run(JSON.stringify(prefs), id);

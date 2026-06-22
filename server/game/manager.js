@@ -24,7 +24,7 @@ import { chooseDotsAction } from './dotsAI.js';
 import { chooseBackgammonAction } from './backgammonAI.js';
 import { chooseHokmAction } from './hokmAI.js';
 import { choosePasurAction } from './pasurAI.js';
-import { Games, GameStats, Achievements, applyEloResult, applyEloDraw } from '../models.js';
+import { Games, GameStats, Achievements, Users, applyEloResult, applyEloDraw } from '../models.js';
 import { evaluateAchievements, ACHIEVEMENT_MAP } from '../../public/js/achievements.js';
 import db, { getSettings } from '../db.js';
 
@@ -221,6 +221,7 @@ class Room {
     this.lastActivity = Date.now();
     this.idleTimer = null;
     this.rematchVotes = new Set();
+    this.predictions = new Map(); // spectator socketId -> { seat, userId }
     this.series = null; // set for multi-game "league" rooms
     // chess clock
     const ms = (config.timeLimit || 0) * 1000;
@@ -434,6 +435,7 @@ export class GameManager {
     room.gameType = cfg.gameType;
     room.game = buildEngine(cfg.gameType, cfg);
     room.rematchVotes.clear();
+    room.predictions.clear();
     for (let s = 0; s < room.numPlayers; s++) {
       if (room.players[s]) room.players[s].color = cfg.colors[s];
     }
@@ -740,6 +742,7 @@ export class GameManager {
     // Per-game stats & per-game ELO (best-effort; never blocks the result).
     let gameElo = null;
     try { gameElo = this.recordGameStats(room, { winnerSeat, isDraw }); } catch { /* ignore */ }
+    try { this.resolvePredictions(room, winnerSeat); } catch { /* ignore */ }
 
     // Series bookkeeping: award points and decide whether the league continues.
     if (room.series && !room.series.done) {
@@ -814,10 +817,35 @@ export class GameManager {
     room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
     room.status = 'active';
     room.rematchVotes.clear();
+    room.predictions.clear();
     this.startClock(room);
     this.resetIdleTimer(room);
     this.emitPerSeat(room, 'game:start', (s) => room.publicView(s));
     this.maybeRunAI(room);
+  }
+
+  /** Record a spectator's winner prediction for the current game. */
+  setPrediction(room, socket, seat) {
+    if (room.status !== 'active') return false;
+    if (room.seatOf(socket.id) >= 0) return false; // players can't predict
+    seat = parseInt(seat, 10);
+    if (!Number.isInteger(seat) || seat < 0 || seat >= room.numPlayers) return false;
+    room.predictions.set(socket.id, { seat, userId: socket.data.identity?.userId ?? null });
+    return true;
+  }
+
+  /** Resolve all spectator predictions once a game ends. */
+  resolvePredictions(room, winnerSeat) {
+    if (!room.predictions.size) return;
+    const teams = !!room.config.teams;
+    const winningTeam = room.game.winningTeam ?? null;
+    for (const [sid, pred] of room.predictions) {
+      const correct = winnerSeat != null && (
+        pred.seat === winnerSeat || (teams && winningTeam != null && pred.seat % 2 === winningTeam));
+      if (pred.userId) Users.recordPrediction(pred.userId, correct);
+      this.io.to(sid).emit('predict:result', { correct, winner: winnerSeat });
+    }
+    room.predictions.clear();
   }
 
   /** Offer / accept a draw (2-player only). */

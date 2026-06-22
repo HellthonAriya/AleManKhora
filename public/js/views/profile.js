@@ -45,6 +45,7 @@ export async function ProfileView(username) {
           statBox(user.wins, 'برد'),
           statBox(user.losses, 'باخت'),
           statBox(faNum(winRate) + '٪', 'نرخ برد'),
+          user.predTotal ? statBox(faNum(Math.round((user.predCorrect / user.predTotal) * 100)) + '٪', 'دقت پیش‌بینی') : null,
         ),
       ),
     );

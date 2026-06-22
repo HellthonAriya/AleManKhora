@@ -91,9 +91,11 @@ addCol('p2_name', 'TEXT');
 addCol('p3_name', 'TEXT');
 addCol('game_type', 'TEXT'); // denormalized from config for stats/head-to-head
 
-// Overall win streak on the user (for streak achievements).
+// Overall win streak + spectator prediction tallies on the user.
 const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
 if (!userCols.includes('win_streak')) db.exec('ALTER TABLE users ADD COLUMN win_streak INTEGER NOT NULL DEFAULT 0');
+if (!userCols.includes('pred_total')) db.exec('ALTER TABLE users ADD COLUMN pred_total INTEGER NOT NULL DEFAULT 0');
+if (!userCols.includes('pred_correct')) db.exec('ALTER TABLE users ADD COLUMN pred_correct INTEGER NOT NULL DEFAULT 0');
 
 /* --------------------------- Default settings ----------------------------- */
 const DEFAULT_SETTINGS = {

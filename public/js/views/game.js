@@ -47,6 +47,7 @@ export function GameView(roomId) {
   let rematchPending = false; // true after we vote for a rematch, until it starts
   let series = null;          // multi-game league state (null for single games)
   let seriesPending = false;  // true after we vote ready for the next series game
+  let myPrediction = null;    // spectator's predicted winner seat
   let overModalHandle = null; // handle to the open game-over popup, if any
   let drawWaitModal = null;   // our "waiting for opponent" draw popup (offerer side)
   let drawRecvModal = null;   // the incoming draw-offer popup (receiver side)
@@ -480,6 +481,24 @@ export function GameView(roomId) {
     return card;
   }
 
+  /** Spectator-only: predict the winner while the game is live. */
+  function predictionCard() {
+    if (!spectator || status !== 'active' || gameIsOver()) return null;
+    const card = h('div', { class: 'card', style: 'margin-top:14px' },
+      h('div', { class: 'card-title' }, '🔮 پیش‌بینی برنده'),
+      h('p', { class: 'card-sub' }, myPrediction != null ? 'پیش‌بینی‌ات ثبت شد — می‌توانی عوضش کنی.' : 'حدس بزن کی می‌برد؛ دقت پیش‌بینی‌هایت ثبت می‌شود.'));
+    for (let s = 0; s < numPlayers; s++) {
+      const p = players[s];
+      if (!p) continue;
+      const teamTag = config?.teams ? ` (${TEAM_NAMES[s % 2]})` : '';
+      card.append(h('button', {
+        class: 'btn btn-sm btn-block' + (myPrediction === s ? ' btn-primary' : ''), style: 'margin-top:6px',
+        onclick: () => { myPrediction = s; socket.emit('predict:set', { seat: s }); renderControls(); },
+      }, h('span', { class: 'dotc', style: `background:${seatColor(s)}` }), ` ${p.name}${teamTag}`));
+    }
+    return card;
+  }
+
   function renderControls() {
     clear(controlsMount);
     if (spectator) {
@@ -487,6 +506,8 @@ export function GameView(roomId) {
         h('div', { class: 'card-title' }, '👁 حالت تماشاگر'),
         h('p', { class: 'card-sub', style: 'margin:0' }, 'تو در حال تماشای زندهٔ این بازی هستی.'),
         h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:12px', onclick: () => navigate('/lobby') }, 'بازگشت به سالن')));
+      const pc = predictionCard();
+      if (pc) controlsMount.append(pc);
     } else if (status === 'waiting') {
       const inviteBox = code ? h('div', { class: 'card' },
         h('div', { class: 'card-title' }, '🔗 دعوت دوست'),
@@ -704,7 +725,7 @@ export function GameView(roomId) {
 
   const handlers = {
     'game:start': (v) => {
-      rematchPending = false; seriesPending = false;
+      rematchPending = false; seriesPending = false; myPrediction = null;
       if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
       applyView(v);
       playSound('start');
@@ -712,6 +733,10 @@ export function GameView(roomId) {
       toast(msg, 'success');
     },
     'series:ready': ({ votes }) => toast(`آمادهٔ بازی بعد (${faNum(votes.length)})`),
+    'predict:result': ({ correct }) => {
+      toast(correct ? '🔮 پیش‌بینی‌ات درست بود! ✅' : '🔮 پیش‌بینی‌ات اشتباه بود.', correct ? 'success' : 'error');
+      playSound(correct ? 'win' : 'notify');
+    },
     'achievement:earned': ({ achievements }) => {
       (achievements || []).forEach((a, i) => setTimeout(() => {
         toast(`${a.icon} دستاورد جدید: ${a.name}`, 'success');
