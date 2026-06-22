@@ -446,6 +446,31 @@ export function GameView(roomId) {
 
   function diffLabel(d) { return d === 'easy' ? 'آسان' : d === 'hard' ? 'سخت' : 'متوسط'; }
 
+  /** Invite online friends straight into this waiting room (no code needed). */
+  function inviteFriendsCard() {
+    if (spectator || !store.isLoggedIn || store.me?.isGuest) return null;
+    const card = h('div', { class: 'card', style: 'margin-top:14px' },
+      h('div', { class: 'card-title' }, '👥 دعوت دوستان آنلاین'));
+    const body = h('div', {}, h('p', { class: 'faint' }, 'در حال یافتن دوستان…'));
+    card.append(body);
+    api('/friends').then(({ friends }) => {
+      const online = (friends || []).filter((f) => f.online);
+      clear(body);
+      if (!online.length) { body.append(h('p', { class: 'faint' }, 'هیچ دوست آنلاینی نداری. از صفحهٔ دوستان اضافه کن.')); return; }
+      online.forEach((f) => body.append(h('div', { style: 'display:flex;align-items:center;gap:8px;margin-top:8px' },
+        h('span', { class: 'nav-avatar', style: `background:${f.avatarColor}` }, initials(f.username)),
+        h('span', { style: 'flex:1' }, f.username, h('span', { class: 'online-dot' })),
+        h('button', { class: 'btn btn-sm btn-primary', onclick: (e) => {
+          e.target.disabled = true; e.target.textContent = 'ارسال شد ✓';
+          socket.emit('friend:invite', { toUserId: f.id, roomId }, (res) => {
+            toast(res?.ok ? `دعوت برای ${f.username} فرستاده شد` : (res?.error || 'خطا'), res?.ok ? 'success' : 'error');
+            if (!res?.ok) { e.target.disabled = false; e.target.textContent = 'دعوت'; }
+          });
+        } }, 'دعوت'))));
+    }).catch(() => { clear(body); body.append(h('p', { class: 'faint' }, 'خطا در بارگذاری دوستان.')); });
+    return card;
+  }
+
   /** Host-only panel for filling empty seats with bots while the room waits. */
   function seatManagerCard() {
     if (seat !== 0 || !code || status !== 'waiting') return null;
@@ -527,6 +552,8 @@ export function GameView(roomId) {
         h('p', { class: 'faint', style: 'margin-top:10px' }, `${faNum(players.filter(Boolean).length)} از ${faNum(numPlayers)} بازیکن آماده`),
       ) : h('div', { class: 'card' }, h('p', { class: 'muted' }, 'در انتظار حریف…'));
       controlsMount.append(inviteBox);
+      const fc = inviteFriendsCard();
+      if (fc) controlsMount.append(fc);
       const sm = seatManagerCard();
       if (sm) controlsMount.append(sm);
     } else if (status === 'active') {

@@ -2,7 +2,8 @@
  * AleManKhora — Socket.IO real-time layer
  */
 import { verifyToken, COOKIE } from './auth.js';
-import { Users } from './models.js';
+import { Users, Friends } from './models.js';
+import { presence } from './presence.js';
 
 function parseCookies(str = '') {
   const out = {};
@@ -37,8 +38,27 @@ const REACTION_SET = new Set(['👍', '😂', '🔥', '😮', '😢', '👏', '�
 export function registerSocket(io, manager) {
   io.on('connection', (socket) => {
     socket.data.identity = identityFromSocket(socket);
+    if (socket.data.identity.userId) presence.add(socket.data.identity.userId, socket.id);
 
     const emitErr = (msg) => socket.emit('game:error', { error: msg });
+
+    /* ----------------------- Friends: direct invite --------------------- */
+    socket.on('friend:invite', ({ toUserId, roomId } = {}, cb) => {
+      const me = socket.data.identity;
+      if (!me.userId) return cb?.({ ok: false, error: 'برای دعوت باید وارد حساب شوی' });
+      const room = manager.getRoom(roomId || socket.data.roomId);
+      if (!room) return cb?.({ ok: false, error: 'اتاقی برای دعوت پیدا نشد' });
+      const target = parseInt(toUserId, 10);
+      if (!Friends.areFriends(me.userId, target)) return cb?.({ ok: false, error: 'با این کاربر دوست نیستی' });
+      const sids = presence.socketsOf(target);
+      if (!sids.length) return cb?.({ ok: false, error: 'دوستت آنلاین نیست' });
+      for (const sid of sids) {
+        io.to(sid).emit('friend:invited', {
+          fromName: me.name, roomId: room.id, code: room.code, gameType: room.gameType,
+        });
+      }
+      cb?.({ ok: true });
+    });
 
     /* --------------------------- Create games ---------------------------- */
     socket.on('room:createPrivate', (config, cb) => {
@@ -395,6 +415,7 @@ export function registerSocket(io, manager) {
     /* ================================================================= */
 
     socket.on('disconnect', () => {
+      if (socket.data.identity?.userId) presence.remove(socket.data.identity.userId, socket.id);
       // Clean up voice membership on disconnect
       const room = manager.getRoom(socket.data.roomId);
       if (room?.voiceMembers?.has(socket.id)) {

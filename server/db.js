@@ -73,10 +73,20 @@ CREATE TABLE IF NOT EXISTS achievements (
   PRIMARY KEY (user_id, code)
 );
 
+CREATE TABLE IF NOT EXISTS friendships (
+  user_id    INTEGER NOT NULL,
+  friend_id  INTEGER NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'pending', -- pending | accepted
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, friend_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_elo ON users(elo DESC);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_gamestats_user ON game_stats(user_id);
 CREATE INDEX IF NOT EXISTS idx_ach_user ON achievements(user_id);
+CREATE INDEX IF NOT EXISTS idx_friend_user ON friendships(user_id);
+CREATE INDEX IF NOT EXISTS idx_friend_friend ON friendships(friend_id);
 `);
 
 /* --------------------------- Schema migrations ---------------------------- */

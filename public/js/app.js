@@ -1,21 +1,36 @@
 /* =========================================================================
    اَلِ من خورا — App shell: router, navbar, socket, boot
    ========================================================================= */
-import { h, $, $$, store, api, clear, toast, applyTheme, initials } from './core.js';
+import { h, $, $$, store, api, clear, toast, modal, applyTheme, initials } from './core.js';
 import { HomeView } from './views/home.js';
 import { AuthView } from './views/auth.js';
 import { LobbyView } from './views/lobby.js';
 import { GameView } from './views/game.js';
 import { LeaderboardView } from './views/leaderboard.js';
 import { ProfileView } from './views/profile.js';
+import { FriendsView } from './views/friends.js';
 import { AdminView } from './views/admin.js';
 
 /* -------------------------------- Socket --------------------------------- */
 let socket = null;
+let inviteModal = null;
 export function getSocket() {
   if (!socket) {
     socket = io({ withCredentials: true });
     socket.on('connect_error', () => toast('اتصال بلادرنگ برقرار نشد', 'error'));
+    // Global: a friend invited us to their game — works from any page.
+    socket.on('friend:invited', ({ fromName, roomId, gameType }) => {
+      if (inviteModal) inviteModal.close();
+      inviteModal = modal({
+        title: '🎮 دعوت به بازی',
+        body: h('p', { class: 'center' }, `«${fromName}» تو را به یک بازی دعوت کرد.`),
+        actions: [
+          { label: 'بعداً', class: 'btn-ghost' },
+          { label: 'بپیوند', class: 'btn-primary', onClick: () => { inviteModal = null; navigate(`/game/${roomId}`); } },
+        ],
+        onClose: () => { inviteModal = null; },
+      });
+    });
   }
   return socket;
 }
@@ -51,6 +66,7 @@ const routes = [
   { re: /^\/game\/([\w-]+)$/, view: (m) => GameView(m[1]), auth: true },
   { re: /^\/leaderboard$/, view: () => LeaderboardView() },
   { re: /^\/profile$/, view: () => ProfileView(), auth: true },
+  { re: /^\/friends$/, view: () => FriendsView(), auth: true },
   { re: /^\/u\/(.+)$/, view: (m) => ProfileView(decodeURIComponent(m[1])) },
   { re: /^\/admin$/, view: () => AdminView(), admin: true },
 ];
@@ -108,6 +124,7 @@ function renderNav() {
       link('#/lobby', '🎮', 'سالن بازی'),
       link('#/leaderboard', '🏆', 'رتبه‌بندی'),
     );
+    if (!store.me.isGuest) links.append(link('#/friends', '👥', 'دوستان'));
     if (store.isAdmin) links.append(link('#/admin', '🛡', 'مدیریت'));
     nav.append(links);
 

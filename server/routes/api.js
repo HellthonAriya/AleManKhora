@@ -3,8 +3,9 @@
  */
 import express from 'express';
 import { customAlphabet } from 'nanoid';
-import { Users, Games, GameStats, Achievements } from '../models.js';
+import { Users, Games, GameStats, Achievements, Friends } from '../models.js';
 import { getSettings } from '../db.js';
+import { presence } from '../presence.js';
 import {
   setAuthCookie, clearAuthCookie, requireAuth, requireUser,
 } from '../auth.js';
@@ -140,6 +141,46 @@ router.post('/profile/password', requireUser, async (req, res) => {
   if (!next || next.length < 6) return res.status(400).json({ error: 'رمز جدید کوتاه است' });
   await Users.setPassword(req.auth.id, next);
   res.json({ ok: true });
+});
+
+/* ------------------------------ Friends ----------------------------------- */
+
+router.get('/friends', requireUser, (req, res) => {
+  const me = req.auth.id;
+  const withOnline = (rows) => rows.map((u) => ({ ...u, online: presence.isOnline(u.id) }));
+  res.json({
+    friends: withOnline(Friends.list(me)),
+    incoming: Friends.incoming(me),
+    outgoing: Friends.outgoing(me),
+  });
+});
+
+router.get('/friends/search', requireUser, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json({ results: [] });
+  const friendIds = new Set(Friends.list(req.auth.id).map((f) => f.id));
+  const results = Users.list({ q, limit: 12 })
+    .filter((u) => u.id !== req.auth.id && !u.isBanned)
+    .map((u) => ({ id: u.id, username: u.username, avatarColor: u.avatarColor, elo: u.elo,
+      online: presence.isOnline(u.id), isFriend: friendIds.has(u.id) }));
+  res.json({ results });
+});
+
+router.post('/friends/request', requireUser, (req, res) => {
+  const friendId = parseInt(req.body?.userId, 10);
+  if (!friendId) return res.status(400).json({ error: 'کاربر نامعتبر' });
+  if (!Users.byId(friendId)) return res.status(404).json({ error: 'کاربر یافت نشد' });
+  res.json(Friends.request(req.auth.id, friendId));
+});
+
+router.post('/friends/accept', requireUser, (req, res) => {
+  const requesterId = parseInt(req.body?.userId, 10);
+  res.json({ ok: Friends.accept(req.auth.id, requesterId) });
+});
+
+router.post('/friends/remove', requireUser, (req, res) => {
+  const friendId = parseInt(req.body?.userId, 10);
+  res.json({ ok: Friends.remove(req.auth.id, friendId) });
 });
 
 /* ---------------------------- Leaderboard --------------------------------- */

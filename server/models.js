@@ -343,3 +343,70 @@ export const Achievements = {
     return info.changes > 0;
   },
 };
+
+/* ------------------------------- Friends ---------------------------------- */
+
+const friendCols = 'u.id, u.username, u.avatar_color AS avatarColor, u.elo, u.last_seen AS lastSeen';
+
+export const Friends = {
+  _edge(a, b) { return db.prepare('SELECT * FROM friendships WHERE user_id=? AND friend_id=?').get(a, b); },
+
+  /** Send a request (or auto-accept if the other side already requested). */
+  request(userId, friendId) {
+    if (!userId || !friendId || userId === friendId) return { error: 'نامعتبر' };
+    const reverse = Friends._edge(friendId, userId);
+    if (reverse) {
+      if (reverse.status === 'pending') { Friends.accept(userId, friendId); return { accepted: true }; }
+      return { already: true };
+    }
+    if (Friends._edge(userId, friendId)) return { already: true };
+    db.prepare('INSERT INTO friendships(user_id, friend_id, status, created_at) VALUES(?,?,?,?)')
+      .run(userId, friendId, 'pending', Date.now());
+    return { requested: true };
+  },
+
+  /** Accept a pending request from `requesterId` to `userId`. */
+  accept(userId, requesterId) {
+    const row = Friends._edge(requesterId, userId);
+    if (!row || row.status !== 'pending') return false;
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE friendships SET status=? WHERE user_id=? AND friend_id=?').run('accepted', requesterId, userId);
+      db.prepare(`INSERT INTO friendships(user_id, friend_id, status, created_at) VALUES(?,?,?,?)
+                  ON CONFLICT(user_id, friend_id) DO UPDATE SET status='accepted'`)
+        .run(userId, requesterId, 'accepted', Date.now());
+    });
+    tx();
+    return true;
+  },
+
+  /** Remove a friendship / decline a request (both directions). */
+  remove(userId, friendId) {
+    db.prepare('DELETE FROM friendships WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)')
+      .run(userId, friendId, friendId, userId);
+    return true;
+  },
+
+  areFriends(a, b) {
+    const e = Friends._edge(a, b);
+    return !!(e && e.status === 'accepted');
+  },
+
+  list(userId) {
+    return db.prepare(
+      `SELECT ${friendCols} FROM friendships f JOIN users u ON u.id = f.friend_id
+        WHERE f.user_id=? AND f.status='accepted' ORDER BY u.username`
+    ).all(userId);
+  },
+  incoming(userId) {
+    return db.prepare(
+      `SELECT ${friendCols} FROM friendships f JOIN users u ON u.id = f.user_id
+        WHERE f.friend_id=? AND f.status='pending' ORDER BY f.created_at DESC`
+    ).all(userId);
+  },
+  outgoing(userId) {
+    return db.prepare(
+      `SELECT ${friendCols} FROM friendships f JOIN users u ON u.id = f.friend_id
+        WHERE f.user_id=? AND f.status='pending' ORDER BY f.created_at DESC`
+    ).all(userId);
+  },
+};
