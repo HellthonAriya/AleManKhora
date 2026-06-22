@@ -42,10 +42,37 @@ export function registerSocket(io, manager) {
       try {
         const room = manager.createPrivate(config || {});
         const seat = manager.seatPlayer(room, socket, socket.data.identity, 0);
+        // Optionally pre-fill seats with bots chosen at creation time.
+        const bots = parseInt(config?.bots, 10) || 0;
+        if (bots > 0) manager.fillBots(room, bots, config?.botDifficulty);
+        manager.maybeStart(room); // starts immediately if bots filled every seat
         cb?.({ ok: true, roomId: room.id, code: room.code, seat, view: room.publicView(seat) });
       } catch (e) {
         cb?.({ ok: false, error: e.message });
       }
+    });
+
+    /* ----------------------- Bots in private rooms ----------------------- */
+    // Only the host (seat 0) of a non-matchmaking room may add/remove bots,
+    // and only while the room is still waiting to start.
+    socket.on('room:addBot', ({ seat, difficulty } = {}, cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room) return cb?.({ ok: false, error: 'بازی یافت نشد' });
+      if (room.mode === 'random' || room.seatOf(socket.id) !== 0 || room.status !== 'waiting') {
+        return cb?.({ ok: false, error: 'مجاز نیست' });
+      }
+      if (!manager.addBot(room, seat, difficulty)) return cb?.({ ok: false, error: 'صندلی در دسترس نیست' });
+      manager.emitPerSeat(room, 'room:update', (vs) => room.publicView(vs));
+      manager.maybeStart(room);
+      cb?.({ ok: true });
+    });
+    socket.on('room:removeBot', ({ seat } = {}, cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room) return cb?.({ ok: false });
+      if (room.seatOf(socket.id) !== 0 || room.status !== 'waiting') return cb?.({ ok: false });
+      if (!manager.removeBot(room, seat)) return cb?.({ ok: false });
+      manager.emitPerSeat(room, 'room:update', (vs) => room.publicView(vs));
+      cb?.({ ok: true });
     });
 
     socket.on('room:createAI', ({ config, difficulty } = {}, cb) => {

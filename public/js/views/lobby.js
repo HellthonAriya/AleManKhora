@@ -164,11 +164,42 @@ export function LobbyView() {
   }
 
   function openPrivate() {
-    customizerModal('ساخت اتاق خصوصی', 'ساخت اتاق', (config) => {
-      socket.emit('room:createPrivate', config, (res) => {
-        if (!res?.ok) return toast(res?.error || 'خطا در ساخت اتاق', 'error');
-        navigate(`/game/${res.roomId}`);
-      });
+    const customizer = makeCustomizer(gameType);
+    // Optional bots to pre-fill empty seats. Host can also add/remove bots
+    // later inside the waiting room; this is just a head start.
+    let bots = 0;
+    let botDifficulty = store.config?.aiDifficulty || 'normal';
+    const botSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    [['۰', 0], ['۱', 1], ['۲', 2], ['۳', 3]].forEach(([l, v]) => {
+      const b = h('button', { class: v === bots ? 'active' : '' }, l);
+      b.addEventListener('click', () => { bots = v; [...botSeg.children].forEach((x) => x.classList.toggle('active', x === b)); diffWrap.style.display = bots > 0 ? '' : 'none'; });
+      botSeg.append(b);
+    });
+    const diffSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    [['easy', 'آسان'], ['normal', 'متوسط'], ['hard', 'سخت']].forEach(([v, l]) => {
+      const b = h('button', { class: v === botDifficulty ? 'active' : '' }, l);
+      b.addEventListener('click', () => { botDifficulty = v; [...diffSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
+      diffSeg.append(b);
+    });
+    const diffWrap = h('div', { class: 'opt-group', style: 'display:none' }, h('label', {}, 'سطح سختی بات‌ها'), diffSeg);
+    modal({
+      title: `${gameLabel(gameType)} — ساخت اتاق خصوصی`,
+      body: h('div', {},
+        customizer.element,
+        h('div', { class: 'opt-group' }, h('label', {}, '🤖 پر کردن صندلی‌ها با بات'),
+          botSeg,
+          h('p', { class: 'faint', style: 'margin-top:6px' }, 'صندلی‌های خالی با بات پر می‌شوند؛ بقیه را دوستانت با کد پر می‌کنند.')),
+        diffWrap),
+      actions: [
+        { label: 'انصراف', class: 'btn-ghost' },
+        { label: 'ساخت اتاق', class: 'btn-primary', onClick: () => {
+          const config = { ...customizer.getConfig(), gameType, bots, botDifficulty };
+          socket.emit('room:createPrivate', config, (res) => {
+            if (!res?.ok) return toast(res?.error || 'خطا در ساخت اتاق', 'error');
+            navigate(`/game/${res.roomId}`);
+          });
+        } },
+      ],
     });
   }
 

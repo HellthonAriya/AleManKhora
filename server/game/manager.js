@@ -309,14 +309,51 @@ export class GameManager {
     room.aiDifficulty = difficulty || getSettings().ai_difficulty || 'normal';
     // All seats except 0 are AI.
     for (let s = 1; s < room.numPlayers; s++) {
-      room.aiSeats.add(s);
-      room.players[s] = {
-        socketId: null, userId: null, guestId: null,
-        name: room.numPlayers > 2 ? `هوش مصنوعی ${s}` : 'هوش مصنوعی',
-        color: room.config.colors[s], connected: true, elo: '—', isAI: true,
-      };
+      this.addBot(room, s, room.aiDifficulty);
     }
     return room;
+  }
+
+  /** Build a bot player object for a given seat. */
+  _makeBot(room, seat, difficulty) {
+    return {
+      socketId: null, userId: null, guestId: null,
+      name: room.numPlayers > 2 ? `هوش مصنوعی ${seat}` : 'هوش مصنوعی',
+      color: room.config.colors[seat], connected: true, elo: '—', isAI: true,
+      aiDifficulty: ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal',
+    };
+  }
+
+  /** Seat a bot at a specific empty seat (host-managed mixed rooms). Seat 0 is
+   *  reserved for the host, so bots only fill seats >= 1. Returns true on success. */
+  addBot(room, seat, difficulty) {
+    if (room.status !== 'waiting') return false;
+    seat = parseInt(seat, 10);
+    if (!Number.isInteger(seat) || seat < 1 || seat >= room.numPlayers) return false;
+    if (room.players[seat]) return false; // occupied
+    room.players[seat] = this._makeBot(room, seat, difficulty);
+    room.aiSeats.add(seat);
+    return true;
+  }
+
+  /** Remove a bot previously seated at `seat`. Returns true on success. */
+  removeBot(room, seat) {
+    if (room.status !== 'waiting') return false;
+    seat = parseInt(seat, 10);
+    const p = room.players[seat];
+    if (!p || !p.isAI) return false;
+    room.players[seat] = null;
+    room.aiSeats.delete(seat);
+    return true;
+  }
+
+  /** Fill the highest `count` empty seats with bots (used at room creation). */
+  fillBots(room, count, difficulty) {
+    let added = 0;
+    for (let s = room.numPlayers - 1; s >= 1 && added < count; s--) {
+      if (!room.players[s] && this.addBot(room, s, difficulty)) added++;
+    }
+    return added;
   }
 
   getRoom(id) { return this.rooms.get(id); }
@@ -456,18 +493,20 @@ export class GameManager {
     return result;
   }
 
-  /** Dispatch to the right AI for this room's game type. */
+  /** Dispatch to the right AI for this room's game type. Each bot may carry its
+   *  own difficulty (mixed rooms); fall back to the room-wide difficulty. */
   pickAIAction(room, seat) {
+    const diff = room.players[seat]?.aiDifficulty || room.aiDifficulty || 'normal';
     switch (room.gameType) {
-      case 'chess': case 'chess4': case 'chesszade': return chooseChessAction(room.game, seat, room.aiDifficulty);
-      case 'tictactoe': return chooseTicTacToeAction(room.game, seat, room.aiDifficulty);
-      case 'gomoku': return chooseGomokuAction(room.game, seat, room.aiDifficulty);
-      case 'othello': return chooseOthelloAction(room.game, seat, room.aiDifficulty);
-      case 'dots': return chooseDotsAction(room.game, seat, room.aiDifficulty);
-      case 'backgammon': return chooseBackgammonAction(room.game, seat, room.aiDifficulty);
-      case 'hokm': return chooseHokmAction(room.game, seat, room.aiDifficulty);
-      case 'pasur': return choosePasurAction(room.game, seat, room.aiDifficulty);
-      default: return chooseAction(room.game, seat, room.aiDifficulty);
+      case 'chess': case 'chess4': case 'chesszade': return chooseChessAction(room.game, seat, diff);
+      case 'tictactoe': return chooseTicTacToeAction(room.game, seat, diff);
+      case 'gomoku': return chooseGomokuAction(room.game, seat, diff);
+      case 'othello': return chooseOthelloAction(room.game, seat, diff);
+      case 'dots': return chooseDotsAction(room.game, seat, diff);
+      case 'backgammon': return chooseBackgammonAction(room.game, seat, diff);
+      case 'hokm': return chooseHokmAction(room.game, seat, diff);
+      case 'pasur': return choosePasurAction(room.game, seat, diff);
+      default: return chooseAction(room.game, seat, diff);
     }
   }
 

@@ -405,6 +405,43 @@ export function GameView(roomId) {
     paintClocks();
   }
 
+  function diffLabel(d) { return d === 'easy' ? 'آسان' : d === 'hard' ? 'سخت' : 'متوسط'; }
+
+  /** Host-only panel for filling empty seats with bots while the room waits. */
+  function seatManagerCard() {
+    if (seat !== 0 || !code || status !== 'waiting') return null;
+    let manageable = false;
+    for (let s = 1; s < numPlayers; s++) { const p = players[s]; if (!p || p.isAI) { manageable = true; break; } }
+    if (!manageable) return null;
+
+    let botDifficulty = 'normal';
+    const diffSeg = h('div', { class: 'seg', style: 'margin:6px 0' });
+    [['easy', 'آسان'], ['normal', 'متوسط'], ['hard', 'سخت']].forEach(([v, l]) => {
+      const b = h('button', { class: v === botDifficulty ? 'active' : '' }, l);
+      b.addEventListener('click', () => { botDifficulty = v; [...diffSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
+      diffSeg.append(b);
+    });
+
+    const card = h('div', { class: 'card', style: 'margin-top:14px' },
+      h('div', { class: 'card-title' }, '🤖 صندلی‌ها و بات‌ها'),
+      h('div', { class: 'opt-group' }, h('label', {}, 'سطح سختی بات جدید'), diffSeg));
+
+    for (let s = 1; s < numPlayers; s++) {
+      const p = players[s];
+      const teamTag = config?.teams ? ` · ${TEAM_NAMES[s % 2]}` : '';
+      const label = h('div', { style: 'flex:1;min-width:0;display:flex;align-items:center;gap:6px' },
+        h('span', { class: 'dotc', style: `background:${seatColor(s)}` }),
+        h('span', {}, p ? (p.isAI ? `بات (${diffLabel(p.aiDifficulty)})` : p.name) : `صندلی ${SEAT_LABELS[s]} — خالی`),
+        teamTag ? h('span', { class: 'faint' }, teamTag) : null);
+      let btn;
+      if (p && p.isAI) btn = h('button', { class: 'btn btn-sm btn-ghost', onclick: () => socket.emit('room:removeBot', { seat: s }) }, '✕ حذف');
+      else if (!p) btn = h('button', { class: 'btn btn-sm', onclick: () => socket.emit('room:addBot', { seat: s, difficulty: botDifficulty }) }, '+ بات');
+      else btn = h('span', { class: 'badge' }, 'آماده');
+      card.append(h('div', { style: 'display:flex;align-items:center;gap:8px;margin-top:8px' }, label, btn));
+    }
+    return card;
+  }
+
   function renderControls() {
     clear(controlsMount);
     if (spectator) {
@@ -423,6 +460,8 @@ export function GameView(roomId) {
         h('p', { class: 'faint', style: 'margin-top:10px' }, `${faNum(players.filter(Boolean).length)} از ${faNum(numPlayers)} بازیکن آماده`),
       ) : h('div', { class: 'card' }, h('p', { class: 'muted' }, 'در انتظار حریف…'));
       controlsMount.append(inviteBox);
+      const sm = seatManagerCard();
+      if (sm) controlsMount.append(sm);
     } else if (status === 'active') {
       const card = h('div', { class: 'card' },
         h('div', { class: 'card-title' }, 'کنترل نوبت'),
