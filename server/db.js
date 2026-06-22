@@ -55,8 +55,20 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS game_stats (
+  user_id    INTEGER NOT NULL,
+  game_type  TEXT NOT NULL,
+  played     INTEGER NOT NULL DEFAULT 0,
+  wins       INTEGER NOT NULL DEFAULT 0,
+  losses     INTEGER NOT NULL DEFAULT 0,
+  draws      INTEGER NOT NULL DEFAULT 0,
+  rating     INTEGER NOT NULL DEFAULT 1000,
+  PRIMARY KEY (user_id, game_type)
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_elo ON users(elo DESC);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
+CREATE INDEX IF NOT EXISTS idx_gamestats_user ON game_stats(user_id);
 `);
 
 /* --------------------------- Schema migrations ---------------------------- */
@@ -69,6 +81,7 @@ addCol('p2_id', 'INTEGER');
 addCol('p3_id', 'INTEGER');
 addCol('p2_name', 'TEXT');
 addCol('p3_name', 'TEXT');
+addCol('game_type', 'TEXT'); // denormalized from config for stats/head-to-head
 
 /* --------------------------- Default settings ----------------------------- */
 const DEFAULT_SETTINGS = {

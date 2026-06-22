@@ -722,6 +722,15 @@ export function GameView(roomId) {
       const me = [data.elo.winner, data.elo.loser].find((x) => x.id === store.me?.id);
       if (me) { const diff = me.after - me.before; eloLine = `امتیاز ELO: ${faNum(me.before)} → ${faNum(me.after)} (${diff >= 0 ? '+' : ''}${faNum(diff)})`; }
     }
+    // Per-game rating change (any 2-player game between two rated humans).
+    let gameEloLine = '';
+    if (data.gameElo && store.me?.id) {
+      const mine = [data.gameElo.winner, data.gameElo.loser].find((x) => x.id === store.me.id);
+      if (mine) { const d = mine.after - mine.before; gameEloLine = `امتیاز این بازی: ${faNum(mine.before)} → ${faNum(mine.after)} (${d >= 0 ? '+' : ''}${faNum(d)})`; }
+    }
+    // Head-to-head record vs the opponent (filled async).
+    const h2hLine = h('p', { class: 'muted', style: 'min-height:1px' });
+    maybeFillH2H(h2hLine);
     // Pasur final-score line.
     let scoreLine = '';
     if (gameType === 'pasur' && Array.isArray(data.state?.scores) && !spectator && seat >= 0) {
@@ -737,13 +746,26 @@ export function GameView(roomId) {
       body: h('div', { class: 'center' },
         h('p', { style: 'font-size:1.1rem;margin-bottom:6px' }, headline),
         scoreLine ? h('p', { style: 'font-weight:700;color:var(--accent)' }, scoreLine) : null,
-        eloLine ? h('p', { class: 'muted' }, eloLine) : null),
+        eloLine ? h('p', { class: 'muted' }, eloLine) : null,
+        gameEloLine ? h('p', { class: 'muted' }, gameEloLine) : null,
+        h2hLine),
       actions: [
         { label: 'بازگشت به سالن', class: 'btn-ghost', onClick: () => navigate('/lobby') },
         ...(canRematch ? [{ label: '🔄 بازی مجدد', class: 'btn-primary', onClick: () => { socket.emit('game:rematch'); rematchPending = true; updateBanner(false); /* close popup, show waiting state */ } }] : []),
       ],
     });
   }
+  /** Fetch & display the head-to-head record vs a single rated human opponent. */
+  function maybeFillH2H(target) {
+    if (spectator || numPlayers !== 2 || !store.isLoggedIn) return;
+    const opp = players[1 - seat];
+    if (!opp || opp.isAI || !opp.userId) return;
+    api(`/h2h/${opp.userId}`).then(({ h2h }) => {
+      if (!h2h || !h2h.total) return;
+      target.textContent = `رو در رو با ${opp.name}: ${faNum(h2h.wins)} برد · ${faNum(h2h.losses)} باخت · ${faNum(h2h.draws)} مساوی`;
+    }).catch(() => {});
+  }
+
   function drawReasonText(reason) {
     return reason === 'stalemate' ? 'پات (بدون حرکت مجاز و بدون کیش).'
       : reason === 'fifty' ? 'قانون ۵۰ حرکت.'

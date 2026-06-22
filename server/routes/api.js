@@ -3,7 +3,7 @@
  */
 import express from 'express';
 import { customAlphabet } from 'nanoid';
-import { Users, Games } from '../models.js';
+import { Users, Games, GameStats } from '../models.js';
 import { getSettings } from '../db.js';
 import {
   setAuthCookie, clearAuthCookie, requireAuth, requireUser,
@@ -102,12 +102,22 @@ router.get('/profile/:username', (req, res) => {
   if (!row) return res.status(404).json({ error: 'کاربر یافت نشد' });
   const user = Users.byId(row.id);
   const recent = Games.recentForUser(row.id, 15).map((g) => ({
-    id: g.id, mode: g.mode, winnerId: g.winner_id,
+    id: g.id, mode: g.mode, winnerId: g.winner_id, gameType: g.game_type,
     p0_name: g.p0_name, p1_name: g.p1_name,
     moveCount: g.move_count, finishedAt: g.finished_at,
     result: g.winner_id === row.id ? 'win' : (g.winner_id ? 'loss' : 'draw'),
   }));
-  res.json({ user, recent });
+  const gameStats = GameStats.forUser(row.id);
+  res.json({ user, recent, gameStats });
+});
+
+/** Head-to-head record between the signed-in user and another player. */
+router.get('/h2h/:opponentId', requireUser, (req, res) => {
+  const opponentId = parseInt(req.params.opponentId, 10);
+  if (!opponentId || opponentId === req.auth.id) {
+    return res.json({ h2h: { wins: 0, losses: 0, draws: 0, total: 0 } });
+  }
+  res.json({ h2h: GameStats.headToHead(req.auth.id, opponentId) });
 });
 
 router.patch('/profile', requireUser, (req, res) => {

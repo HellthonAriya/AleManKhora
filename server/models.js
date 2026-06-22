@@ -171,8 +171,8 @@ export function applyEloDraw(aId, bId) {
 export const Games = {
   insert(game) {
     db.prepare(
-      `INSERT INTO games(id, status, mode, p0_id, p1_id, p0_name, p1_name, config, state, move_count, created_at)
-       VALUES(@id, @status, @mode, @p0_id, @p1_id, @p0_name, @p1_name, @config, @state, @move_count, @created_at)`
+      `INSERT INTO games(id, status, mode, p0_id, p1_id, p0_name, p1_name, config, state, move_count, created_at, game_type)
+       VALUES(@id, @status, @mode, @p0_id, @p1_id, @p0_name, @p1_name, @config, @state, @move_count, @created_at, @game_type)`
     ).run({
       id: game.id,
       status: game.status,
@@ -185,6 +185,7 @@ export const Games = {
       state: game.state ? JSON.stringify(game.state) : null,
       move_count: game.move_count ?? 0,
       created_at: game.created_at ?? Date.now(),
+      game_type: game.config?.gameType ?? 'quoridor',
     });
   },
   finish(id, { winner, winnerId, state, moveCount, status = 'finished' }) {
@@ -213,5 +214,72 @@ export const Games = {
     const finished = db.prepare("SELECT COUNT(*) n FROM games WHERE status='finished'").get().n;
     const active = db.prepare("SELECT COUNT(*) n FROM games WHERE status='active'").get().n;
     return { total, finished, active };
+  },
+};
+
+/* ----------------------------- Per-game stats ----------------------------- */
+
+export const GameStats = {
+  /** Record one finished game for a user in a given game type. */
+  record({ userId, gameType, result }) {
+    if (!userId || !gameType) return;
+    const col = result === 'win' ? 'wins' : result === 'loss' ? 'losses' : 'draws';
+    db.prepare(
+      `INSERT INTO game_stats(user_id, game_type, played, ${col})
+       VALUES(?, ?, 1, 1)
+       ON CONFLICT(user_id, game_type) DO UPDATE SET
+         played = played + 1, ${col} = ${col} + 1`
+    ).run(userId, gameType);
+  },
+
+  /** Ensure a stats row exists and return its current rating. */
+  _rating(userId, gameType) {
+    const row = db.prepare('SELECT rating FROM game_stats WHERE user_id=? AND game_type=?').get(userId, gameType);
+    return row ? row.rating : 1000;
+  },
+
+  /** Apply a per-game ELO update between two rated users (2-player result). */
+  applyRating(winnerId, loserId, gameType, draw = false) {
+    if (!winnerId || !loserId || !gameType) return null;
+    const rw = GameStats._rating(winnerId, gameType);
+    const rl = GameStats._rating(loserId, gameType);
+    const K = 24;
+    const ew = expectedScore(rw, rl);
+    const el = expectedScore(rl, rw);
+    const sw = draw ? 0.5 : 1;
+    const sl = draw ? 0.5 : 0;
+    const newW = Math.max(100, Math.round(rw + K * (sw - ew)));
+    const newL = Math.max(100, Math.round(rl + K * (sl - el)));
+    db.prepare('UPDATE game_stats SET rating=? WHERE user_id=? AND game_type=?').run(newW, winnerId, gameType);
+    db.prepare('UPDATE game_stats SET rating=? WHERE user_id=? AND game_type=?').run(newL, loserId, gameType);
+    return { winner: { id: winnerId, before: rw, after: newW }, loser: { id: loserId, before: rl, after: newL } };
+  },
+
+  forUser(userId) {
+    return db.prepare(
+      'SELECT game_type, played, wins, losses, draws, rating FROM game_stats WHERE user_id=? ORDER BY played DESC'
+    ).all(userId);
+  },
+
+  /**
+   * Head-to-head record between two users across all finished games where both
+   * occupied a seat. Returns wins/losses/draws from `userId`'s perspective.
+   */
+  headToHead(userId, opponentId) {
+    if (!userId || !opponentId) return { wins: 0, losses: 0, draws: 0, total: 0 };
+    const rows = db.prepare(
+      `SELECT winner_id FROM games
+        WHERE status='finished'
+          AND (p0_id=@me OR p1_id=@me OR p2_id=@me OR p3_id=@me)
+          AND (p0_id=@opp OR p1_id=@opp OR p2_id=@opp OR p3_id=@opp)`
+    ).all({ me: userId, opp: opponentId });
+    let wins = 0, losses = 0, draws = 0;
+    for (const r of rows) {
+      if (r.winner_id == null) draws++;
+      else if (r.winner_id === userId) wins++;
+      else if (r.winner_id === opponentId) losses++;
+      else draws++; // a third party won (4-player) — neutral for this pair
+    }
+    return { wins, losses, draws, total: rows.length };
   },
 };

@@ -24,7 +24,7 @@ import { chooseDotsAction } from './dotsAI.js';
 import { chooseBackgammonAction } from './backgammonAI.js';
 import { chooseHokmAction } from './hokmAI.js';
 import { choosePasurAction } from './pasurAI.js';
-import { Games, applyEloResult, applyEloDraw } from '../models.js';
+import { Games, GameStats, applyEloResult, applyEloDraw } from '../models.js';
 import db, { getSettings } from '../db.js';
 
 const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'hokm', 'pasur'];
@@ -613,6 +613,11 @@ export class GameManager {
       state: room.game.toState(),
       moveCount: room.game.moveCount,
     });
+
+    // Per-game stats & per-game ELO (best-effort; never blocks the result).
+    let gameElo = null;
+    try { gameElo = this.recordGameStats(room, { winnerSeat, isDraw }); } catch { /* ignore */ }
+
     this.broadcast(room, 'game:over', {
       winner: winnerSeat,
       winnerName: winnerPlayer?.name ?? null,
@@ -620,9 +625,43 @@ export class GameManager {
       draw: isDraw,
       reason: endReason,
       elo: eloResult,
+      gameElo,
       clock: room.clockView(),
       state: room.game.toState(),
     });
+  }
+
+  /**
+   * Update per-game played/win/loss/draw tallies for every human seat, and a
+   * per-game ELO rating for 2-player games between two rated humans. Bots and
+   * guests (no userId) are skipped. Returns the per-game ELO delta if any.
+   */
+  recordGameStats(room, { winnerSeat, isDraw }) {
+    const gameType = room.gameType;
+    const winningTeam = room.game.winningTeam ?? null;
+    const teams = !!room.config.teams;
+
+    const resultFor = (seat) => {
+      if (isDraw) return 'draw';
+      if (winnerSeat == null) return 'draw';
+      if (teams && winningTeam != null) return seat % 2 === winningTeam ? 'win' : 'loss';
+      return seat === winnerSeat ? 'win' : 'loss';
+    };
+
+    for (let s = 0; s < room.players.length; s++) {
+      const p = room.players[s];
+      if (!p || p.isAI || !p.userId) continue;
+      GameStats.record({ userId: p.userId, gameType, result: resultFor(s) });
+    }
+
+    // Per-game rating only makes sense in a head-to-head 2-player game.
+    if (room.numPlayers !== 2) return null;
+    const p0 = room.players[0], p1 = room.players[1];
+    const bothRated = p0?.userId && p1?.userId && !p0.isAI && !p1.isAI;
+    if (!bothRated) return null;
+    if (isDraw || winnerSeat == null) return GameStats.applyRating(p0.userId, p1.userId, gameType, true);
+    const winnerP = room.players[winnerSeat], loserP = room.players[1 - winnerSeat];
+    return GameStats.applyRating(winnerP.userId, loserP.userId, gameType, false);
   }
 
   /** Reset a finished room for a rematch (engine + clocks), keeping seats. */
