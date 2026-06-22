@@ -52,7 +52,9 @@ export class HokmRenderer {
     this._raf            = null;
 
     // Flying-card animations: [{card, seat, from, to, startAngle, startTs, dur}]
-    this._flyingCards = [];
+    this._flyingCards    = [];
+    this._trickPileAnims = [];   // [{winner, from, to, t0, dur}]
+    this._pendingCollect = null; // {at, winner}
 
     this._dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     this._bind();
@@ -63,6 +65,9 @@ export class HokmRenderer {
   destroy() {
     window.removeEventListener('resize', this._onResize);
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+    const frame = this.canvas.parentElement;
+    if (frame) frame.style.aspectRatio = '';
+    this.canvas.style.height = '';
   }
 
   setConfig(config) { this.config = { ...this.config, ...config }; this.draw(); }
@@ -87,6 +92,7 @@ export class HokmRenderer {
     const tn = (state && state.trickNumber) || 0;
     if (prev && tn > this._shownTrickNo && state?.lastTrick?.length && state.winner == null) {
       this.holdUntil = ts() + HOLD_MS;
+      this._pendingCollect = { at: this.holdUntil, winner: state.lastTrickWinner };
     }
     this._shownTrickNo = Math.max(this._shownTrickNo, tn);
 
@@ -94,6 +100,7 @@ export class HokmRenderer {
     // so the previous trick and the new card never show on top of each other.
     if (prev && (prev.trick?.length ?? 0) === 0 && (state?.trick?.length ?? 0) >= 1) {
       this.holdUntil = 0;
+      this._pendingCollect = null;
     }
 
     // Queue card-flight animation for the newly played card. If that card is
@@ -172,7 +179,8 @@ export class HokmRenderer {
       ts() < this.holdUntil ||
       ts() < this.trumpFxUntil ||
       ts() < this._trumpShakeStart + SHAKE_DUR ||
-      this._flyingCards.some((f) => ts() < f.startTs + f.dur);
+      this._flyingCards.some((f) => ts() < f.startTs + f.dur) ||
+      this._trickPileAnims.some((a) => ts() < a.t0 + a.dur);
     const step = () => {
       this._raf = null;
       this.draw();
@@ -185,8 +193,12 @@ export class HokmRenderer {
     const rect = this.canvas.getBoundingClientRect();
     const size = Math.max(rect.width, 240);
     this.canvas.width  = size * this._dpr;
-    this.canvas.height = size * this._dpr;
-    this.css = size;
+    this.canvas.height = size * 1.30 * this._dpr;
+    this.canvas.style.height = 'auto';
+    const frame = this.canvas.parentElement;
+    if (frame) frame.style.aspectRatio = '1 / 1.30';
+    this.css  = size;
+    this.cssH = size * 1.30;
     this.draw();
   }
 
@@ -261,6 +273,7 @@ export class HokmRenderer {
   draw() {
     const ctx = this.ctx; if (!ctx) return;
     const S   = this.css;
+    const H   = this.cssH || S;
     const now = ts();
 
     // Expire completed flights
@@ -271,7 +284,7 @@ export class HokmRenderer {
     // Clear the whole canvas first WITHOUT the shake offset — otherwise the
     // offset clear leaves trails of the previous frame.
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
-    ctx.clearRect(0, 0, S, S);
+    ctx.clearRect(0, 0, S, H);
     // Apply the brief trump shake to everything drawn below.
     const [sx, sy] = this._shakeOffset();
     if (sx || sy) ctx.setTransform(this._dpr, 0, 0, this._dpr, sx * this._dpr, sy * this._dpr);
@@ -280,7 +293,7 @@ export class HokmRenderer {
     // transparent page behind the felt at the edges.
     const OVER = 18;
     const th = tableTheme(this.config.boardTheme);
-    this._rr(-OVER, -OVER, S + OVER * 2, S + OVER * 2, 16); ctx.fillStyle = th.edge; ctx.fill();
+    this._rr(-OVER, -OVER, S + OVER * 2, H + OVER * 2, 16); ctx.fillStyle = th.edge; ctx.fill();
     this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.47); ctx.fillStyle = th.felt; ctx.fill();
 
     this.hand = []; this.trumpBtns = [];
@@ -289,6 +302,21 @@ export class HokmRenderer {
     const st    = this.state;
     const place = this._placement(st);
     const CW = S * 0.10, CH = CW * 1.40;
+
+    // Fire pending trick-collect animation once holdUntil expires
+    if (this._pendingCollect && now >= this._pendingCollect.at) {
+      const winner = this._pendingCollect.winner;
+      if (winner != null) {
+        const where = place[winner];
+        const to = this._pilePos(where, S, H);
+        this._trickPileAnims.push({ winner, from: { x: S / 2, y: S * 0.50 }, to, t0: now, dur: 540 });
+      }
+      this._pendingCollect = null;
+      this._ensureAnim();
+    }
+
+    // ── Trick piles (drawn before cards so active cards appear on top) ──
+    this._drawTrickPiles(ctx, S, H, st, place);
 
     // ── Zone A: info bar ──
     this._drawInfoBar(ctx, S, st);
@@ -313,6 +341,9 @@ export class HokmRenderer {
 
     // ── Zone E: my hand ──
     this._drawMyHand(ctx, S, st, CW, CH);
+
+    // ── Trick collect animations ──
+    this._drawTrickAnims(ctx, S, H);
 
     // ── Flying cards on top of everything ──
     for (const f of this._flyingCards) {
@@ -512,6 +543,65 @@ export class HokmRenderer {
         (st.hakem === this.mySeat ? '👑 حاکم · ' : '') + `${fa(t)} / ${fa(st.winThreshold)} دست` + (myActive ? ' · نوبت توست ●' : ''),
         S / 2, ySub + S * 0.014,
       );
+    }
+  }
+
+  /* ── Trick pile geometry ────────────────────────────────────────────── */
+  _pilePos(where, S, H) {
+    const mw = S * 0.065, mh = mw * 1.40;
+    switch (where) {
+      case 'bottom':   return { x: S * 0.87, y: H - mh * 0.6 - S * 0.03 };
+      case 'top':      return { x: S * 0.13, y: S * 0.175 };
+      case 'topleft':  return { x: S * 0.09, y: S * 0.10 };
+      case 'topright': return { x: S * 0.91, y: S * 0.10 };
+      case 'left':     return { x: S * 0.065, y: S * 0.78 };
+      default:         return { x: S * 0.935, y: S * 0.78 };
+    }
+  }
+
+  /* ── Graphical trick-pile stacks for each seat ──────────────────────── */
+  _drawTrickPiles(ctx, S, H, st, place) {
+    const mw = S * 0.065, mh = mw * 1.40;
+    for (let s = 0; s < st.numPlayers; s++) {
+      const count = st.tricksWon?.[s] ?? 0;
+      if (count === 0 && s !== this.mySeat) continue;
+      const where = place[s];
+      const pos   = this._pilePos(where, S, H);
+      if (count === 0) {
+        // Empty placeholder outline
+        this._rr(pos.x - mw / 2, pos.y - mh / 2, mw, mh, mw * 0.14);
+        ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1; ctx.stroke();
+      } else {
+        const shown = Math.min(count, 6);
+        for (let i = 0; i < shown; i++) {
+          this._cardBack(ctx, pos.x - mw / 2 + i * 1.8, pos.y - mh / 2 - i * 2.2, mw, mh, this._seatColor(s));
+        }
+      }
+      ctx.fillStyle = count > 0 ? 'rgba(255,255,255,.82)' : 'rgba(255,255,255,.30)';
+      ctx.font = `bold ${S * 0.022}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(`${fa(count)} دست`, pos.x, pos.y + mh / 2 + 4);
+    }
+  }
+
+  /* ── Trick-collection fly animation ─────────────────────────────────── */
+  _drawTrickAnims(ctx, S, H) {
+    const now = ts();
+    this._trickPileAnims = this._trickPileAnims.filter((a) => now < a.t0 + a.dur);
+    const mw = S * 0.065, mh = mw * 1.40;
+    for (const a of this._trickPileAnims) {
+      const raw  = Math.min(1, (now - a.t0) / a.dur);
+      const ease = 1 - Math.pow(1 - raw, 3);
+      const cpx  = (a.from.x + a.to.x) / 2;
+      const cpy  = (a.from.y + a.to.y) / 2 - S * 0.12;
+      const t    = ease;
+      const bx   = (1-t)*(1-t)*a.from.x + 2*(1-t)*t*cpx + t*t*a.to.x;
+      const by   = (1-t)*(1-t)*a.from.y + 2*(1-t)*t*cpy + t*t*a.to.y;
+      ctx.save();
+      ctx.globalAlpha = 0.92 - raw * 0.25;
+      ctx.shadowColor = this._seatColor(a.winner); ctx.shadowBlur = 8 * (1 - raw);
+      this._cardBack(ctx, bx - mw / 2, by - mh / 2, mw, mh, this._seatColor(a.winner));
+      ctx.restore();
     }
   }
 

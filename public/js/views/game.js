@@ -434,6 +434,28 @@ export function GameView(roomId) {
       }
       card.append(h('button', { class: 'btn btn-danger btn-sm btn-block', style: 'margin-top:10px', onclick: doResign }, '🏳 تسلیم'));
       controlsMount.append(card);
+    } else if (status === 'finished') {
+      const canRematch = !spectator && (aiSeats.length > 0 || players.filter((p) => p && !p.isAI).length >= 1);
+      const card = h('div', { class: 'card' }, h('div', { class: 'card-title' }, '🏁 پایان بازی'));
+      if (rematchPending) {
+        card.append(h('div', { class: 'center', style: 'padding:12px 0' },
+          h('span', { class: 'spinner spinner-sm' }), ' در انتظار شروع بازی مجدد…'));
+      } else {
+        card.append(h('button', { class: 'btn btn-block', style: 'margin-top:10px',
+          onclick: () => navigate('/lobby') }, '🏠 بازگشت به سالن'));
+        if (canRematch) {
+          card.append(h('button', { class: 'btn btn-primary btn-block', style: 'margin-top:8px',
+            onclick: () => {
+              socket.emit('game:rematch');
+              rematchPending = true;
+              updateBanner(false);
+              if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
+              renderControls();
+            },
+          }, '🔄 بازی مجدد'));
+        }
+      }
+      controlsMount.append(card);
     }
     controlsMount.append(appearanceCard());
   }
