@@ -565,7 +565,7 @@ export class HokmRenderer {
   // Individual seat positions (2-player or non-team 4-player)
   _pilePos(where, S, H) {
     switch (where) {
-      case 'bottom':   return { x: S * 0.09, y: H * HAND_BASE_Y + S * 0.07 };
+      case 'bottom':   return { x: S * 0.09, y: H * HAND_BASE_Y - S * 0.10 };
       case 'top':      return { x: S * 0.91, y: H * OPP_CY_TOP };
       case 'topleft':  return { x: S * 0.07, y: H * OPP_CY_TOP + S * 0.01 };
       case 'topright': return { x: S * 0.93, y: H * OPP_CY_TOP + S * 0.01 };
@@ -575,33 +575,39 @@ export class HokmRenderer {
   }
   // Shared team pile positions (used in team mode and for animation targets)
   _teamPilePos(which, S, H) {
-    if (which === 'mine') return { x: S * 0.09, y: H * HAND_BASE_Y + S * 0.07 };
+    if (which === 'mine') return { x: S * 0.09, y: H * HAND_BASE_Y - S * 0.10 };
     return { x: S * 0.91, y: H * OPP_CY_TOP };
   }
 
   /* ── Graphical trick-pile stacks ─────────────────────────────────────── */
   _drawTrickPiles(ctx, S, H, st, place) {
+    const now = ts();
+    // Cards still flying toward a pile must NOT be counted yet — the tally only
+    // grows once the animation lands, so a winning trick "arrives" before it's added.
+    const flying = (pred) => this._trickPileAnims.reduce(
+      (n, a) => (now < a.t0 + a.dur && pred(a.winner) ? n + 1 : n), 0);
+
     if (st.teams && st.numPlayers > 2) {
       // Team mode — one shared pile per team, teammates' tricks combined
       const myTeam   = this.mySeat >= 0 ? this.mySeat % 2 : 0;
-      const myCount  = st.teamTricks?.[myTeam]     ?? 0;
-      const oppCount = st.teamTricks?.[1 - myTeam] ?? 0;
+      const myCount  = (st.teamTricks?.[myTeam]     ?? 0) - flying((w) => w % 2 === myTeam);
+      const oppCount = (st.teamTricks?.[1 - myTeam] ?? 0) - flying((w) => w % 2 !== myTeam);
       const myColor  = this._seatColor(this.mySeat >= 0 ? this.mySeat : 0);
       const oppColor = this._seatColor((this.mySeat >= 0 ? this.mySeat : 0) % 2 === 0 ? 1 : 0);
-      this._drawPileStack(ctx, this._teamPilePos('mine', S, H), myCount,  myColor,  S, true);
-      this._drawPileStack(ctx, this._teamPilePos('opp',  S, H), oppCount, oppColor, S, false);
+      this._drawPileStack(ctx, this._teamPilePos('mine', S, H), Math.max(0, myCount),  myColor,  S, true);
+      this._drawPileStack(ctx, this._teamPilePos('opp',  S, H), Math.max(0, oppCount), oppColor, S, false);
     } else {
       for (let s = 0; s < st.numPlayers; s++) {
-        const count = st.tricksWon?.[s] ?? 0;
-        if (count === 0 && s !== this.mySeat) continue;
-        this._drawPileStack(ctx, this._pilePos(place[s], S, H), count, this._seatColor(s), S, s === this.mySeat);
+        const count = (st.tricksWon?.[s] ?? 0) - flying((w) => w === s);
+        if (count <= 0 && s !== this.mySeat) continue;
+        this._drawPileStack(ctx, this._pilePos(place[s], S, H), Math.max(0, count), this._seatColor(s), S, s === this.mySeat);
       }
     }
   }
 
   _drawPileStack(ctx, pos, count, color, S, showEmpty) {
     const mw = S * 0.068, mh = mw * 1.40;
-    const dx = mw * 0.30;          // 30% of card width — each card clearly peeks out
+    const dx = mw * 0.22;          // each card peeks out a little — tighter overlap
     const dy = mh * 0.08;          // slight upward shift gives depth
     const shown = Math.min(count, 7);
     const totalW = shown > 0 ? mw + (shown - 1) * dx : mw;
