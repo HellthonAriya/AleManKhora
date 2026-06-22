@@ -329,6 +329,13 @@ input, select, textarea { font-family: inherit; }
 .series-score-row.me { background: rgba(19,192,138,.14); }
 .series-score-row .series-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .series-score-row .series-pts { font-weight: 800; color: var(--accent); font-size: 1.05rem; }
+.bracket { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.bracket-round { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 9px; border: 1px solid var(--border); background: rgba(255,255,255,.03); font-size: .82rem; }
+.bracket-round.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.bracket-round.win { border-color: rgba(46,204,113,.5); background: rgba(46,204,113,.1); }
+.bracket-round.loss { border-color: rgba(231,80,58,.5); background: rgba(231,80,58,.1); opacity: .8; }
+.bracket-r { font-weight: 700; min-width: 64px; }
+.bracket-vs { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .series-pick { display: flex; flex-wrap: wrap; gap: 6px; }
 .series-chosen { display: flex; flex-direction: column; gap: 4px; }
 .series-chosen-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 8px; background: rgba(255,255,255,.04); }

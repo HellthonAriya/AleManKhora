@@ -103,6 +103,26 @@ export function registerSocket(io, manager) {
       cb?.({ ok: true });
     });
 
+    /* ----------------------------- Tournament ---------------------------- */
+    socket.on('room:createTournament', (opts, cb) => {
+      try {
+        const room = manager.createTournament(opts || {});
+        const seat = manager.seatPlayer(room, socket, socket.data.identity, 0);
+        manager.maybeStart(room); // human + first bot opponent → starts immediately
+        cb?.({ ok: true, roomId: room.id, seat, view: room.publicView(seat) });
+      } catch (e) {
+        cb?.({ ok: false, error: e.message });
+      }
+    });
+
+    socket.on('tournament:next', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room?.tournament || room.tournament.done || !room.tournament.intermission) return cb?.({ ok: false });
+      if (room.seatOf(socket.id) !== 0) return cb?.({ ok: false });
+      manager.advanceTournament(room);
+      cb?.({ ok: true });
+    });
+
     /* ----------------------- Bots in private rooms ----------------------- */
     // Only the host (seat 0) of a non-matchmaking room may add/remove bots,
     // and only while the room is still waiting to start.

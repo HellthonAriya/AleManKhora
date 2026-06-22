@@ -30,6 +30,8 @@ export const ACHIEVEMENTS = [
   { code: 'master_hokm',     icon: '🃏', name: 'استاد حکم',    desc: '۱۰ برد در حکم.',    check: (c) => sumWins(c, ['hokm']) >= 10 },
   { code: 'master_quoridor', icon: '🧱', name: 'معمار',        desc: '۱۰ برد در اَلِ‌من‌خورا.', check: (c) => sumWins(c, ['quoridor']) >= 10 },
   { code: 'hokm_kot',    icon: '👑', name: 'کوت!',            desc: 'یک دست حکم را بدون گرفتن حتی یک دست توسط حریف بردی.', check: (c) => !!c.hokmSweep },
+  // Granted directly by the server when a knockout is won (never via check()).
+  { code: 'tournament_champ', icon: '🏆', name: 'قهرمان تورنمنت', desc: 'یک تورنمنت حذفی را بردی.', check: () => false },
 ];
 
 export const ACHIEVEMENT_MAP = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.code, a]));

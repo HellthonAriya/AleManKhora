@@ -124,6 +124,7 @@ export function LobbyView() {
       h('div', { class: 'mode-list' },
         modeCard('🤝', 'دعوت دوست', 'یک اتاق خصوصی بساز و کد دعوت را بفرست.', () => openPrivate()),
         modeCard('🏆', 'لیگ چندبازیه', 'چند بازی را پشت‌سر‌هم با امتیاز کل بازی کن.', () => openSeries()),
+        modeCard('🎽', 'تورنمنت حذفی', 'یک جدول حذفی را تا قهرمانی بالا برو.', () => openTournament()),
         modeCard('🤖', 'بازی با هوش مصنوعی', 'با سه سطح سختی تمرین کن.', () => openAI()),
         modeCard('🔑', 'ورود با کد', 'به اتاق دوستت با کد دعوت بپیوند.', () => openJoin()),
       ),
@@ -333,6 +334,47 @@ export function LobbyView() {
           if (playlist.length < 2) { toast('حداقل ۲ بازی انتخاب کن', 'error'); return true; }
           socket.emit('room:createSeries', { playlist, players, bots, botDifficulty }, (res) => {
             if (!res?.ok) return toast(res?.error || 'خطا در ساخت لیگ', 'error');
+            navigate(`/game/${res.roomId}`);
+          });
+        } },
+      ],
+    });
+  }
+
+  const TOURNAMENT_GAMES = ['quoridor', 'chess', 'chesszade', 'hokm', 'pasur', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'];
+  function openTournament() {
+    let tGame = TOURNAMENT_GAMES.includes(gameType) ? gameType : 'chess';
+    let size = 4;
+    let difficulty = 'normal';
+
+    const gameSel = h('select', { class: 'input', onchange: () => { tGame = gameSel.value; } });
+    TOURNAMENT_GAMES.forEach((id) => gameSel.append(h('option', { value: id, selected: id === tGame }, gameLabel(id))));
+
+    const sizeSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    [['۴ نفره', 4], ['۸ نفره', 8]].forEach(([l, v]) => {
+      const b = h('button', { class: v === size ? 'active' : '' }, l);
+      b.addEventListener('click', () => { size = v; [...sizeSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
+      sizeSeg.append(b);
+    });
+    const diffSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    [['easy', 'آسان'], ['normal', 'متوسط'], ['hard', 'سخت']].forEach(([v, l]) => {
+      const b = h('button', { class: v === difficulty ? 'active' : '' }, l);
+      b.addEventListener('click', () => { difficulty = v; [...diffSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
+      diffSeg.append(b);
+    });
+
+    modal({
+      title: '🎽 ساخت تورنمنت حذفی',
+      body: h('div', {},
+        h('div', { class: 'opt-group' }, h('label', {}, 'بازی'), gameSel),
+        h('div', { class: 'opt-group' }, h('label', {}, 'اندازهٔ جدول'), sizeSeg),
+        h('div', { class: 'opt-group' }, h('label', {}, 'سطح سختی پایه'), diffSeg),
+        h('p', { class: 'faint', style: 'margin-top:6px' }, 'هر دور یک حریف؛ هرچه جلوتر بروی، حریف‌ها سخت‌تر می‌شوند. ببازی، حذف می‌شوی.')),
+      actions: [
+        { label: 'انصراف', class: 'btn-ghost' },
+        { label: 'شروع تورنمنت', class: 'btn-primary', onClick: () => {
+          socket.emit('room:createTournament', { gameType: tGame, size, difficulty }, (res) => {
+            if (!res?.ok) return toast(res?.error || 'خطا در ساخت تورنمنت', 'error');
             navigate(`/game/${res.roomId}`);
           });
         } },

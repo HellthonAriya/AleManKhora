@@ -223,6 +223,7 @@ class Room {
     this.rematchVotes = new Set();
     this.predictions = new Map(); // spectator socketId -> { seat, userId }
     this.series = null; // set for multi-game "league" rooms
+    this.tournament = null; // set for knockout rooms
     // chess clock
     const ms = (config.timeLimit || 0) * 1000;
     this.clock = {
@@ -268,6 +269,17 @@ class Room {
       clock: this.clockView(),
       state: this.stateFor(viewerSeat),
       series: this.seriesView(),
+      tournament: this.tournamentView(),
+    };
+  }
+
+  tournamentView() {
+    const t = this.tournament;
+    if (!t) return null;
+    return {
+      size: t.size, round: t.round, totalRounds: t.totalRounds,
+      path: t.path.map((p) => ({ ...p })), done: !!t.done, champion: t.champion,
+      intermission: !!t.intermission,
     };
   }
 
@@ -453,6 +465,88 @@ export class GameManager {
     this.maybeRunAI(room);
   }
 
+  /* ----------------------------- Tournament ------------------------------- */
+
+  // 2-player games that can host a knockout.
+  static TOURNAMENT_GAMES = ['quoridor', 'chess', 'chesszade', 'hokm', 'pasur', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'];
+
+  _bump(diff) { return diff === 'easy' ? 'normal' : diff === 'normal' ? 'hard' : 'hard'; }
+  _roundDifficulty(t, round) {
+    if (round >= t.totalRounds - 1) return 'hard';        // final
+    if (round >= t.totalRounds - 2) return this._bump(t.baseDifficulty); // semi
+    return t.baseDifficulty;
+  }
+
+  /** Build the bot opponent for the human's match in the given round. */
+  _setTournamentOpponent(room) {
+    const t = room.tournament;
+    const diff = this._roundDifficulty(t, t.round);
+    const roundName = t.totalRounds - t.round === 1 ? 'فینال'
+      : t.totalRounds - t.round === 2 ? 'نیمه‌نهایی'
+      : t.totalRounds - t.round === 3 ? 'یک‌چهارم' : `دور ${t.round + 1}`;
+    const name = `حریفِ ${roundName}`;
+    room.players[1] = this._makeBot(room, 1, diff, 'balanced');
+    room.players[1].name = name;
+    room.aiSeats = new Set([1]);
+    return name;
+  }
+
+  /**
+   * Create a single-elimination knockout: the human climbs a bracket of
+   * `size` (4 or 8) by beating one opponent per round, difficulty ramping up.
+   */
+  createTournament({ gameType, size, difficulty }) {
+    if (!GameManager.TOURNAMENT_GAMES.includes(gameType)) throw new Error('این بازی برای تورنمنت پشتیبانی نمی‌شود');
+    const n = [4, 8].includes(parseInt(size, 10)) ? parseInt(size, 10) : 4;
+    const cfg = this._seriesConfig(gameType, 2, {});
+    const room = this.createRoom({ mode: 'tournament', config: cfg, code: codeGen() });
+    room.tournament = {
+      gameType, size: n, baseDifficulty: ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal',
+      round: 0, totalRounds: Math.round(Math.log2(n)),
+      path: [], done: false, champion: null, intermission: false, readyVotes: new Set(),
+    };
+    const opp = this._setTournamentOpponent(room);
+    room.tournament.path.push({ opponent: opp, result: null, field: n });
+    return room;
+  }
+
+  _scoreTournament(room, { winnerSeat, isDraw }) {
+    const t = room.tournament;
+    const cur = t.path[t.path.length - 1];
+    if (isDraw || winnerSeat == null) { cur.result = 'draw'; return; } // replay same round
+    if (winnerSeat === 0) {
+      cur.result = 'win';
+      if (t.round >= t.totalRounds - 1) { t.done = true; t.champion = 0; }
+    } else {
+      cur.result = 'loss'; t.done = true; t.champion = 1;
+    }
+  }
+
+  /** Advance the knockout: replay on a draw, otherwise climb to the next round. */
+  advanceTournament(room) {
+    const t = room.tournament;
+    if (!t || t.done) return;
+    t.intermission = false; t.readyVotes = new Set();
+    const last = t.path[t.path.length - 1];
+    if (last.result === 'win') {
+      t.round++;
+      const opp = this._setTournamentOpponent(room);
+      t.path.push({ opponent: opp, result: null, field: Math.max(2, t.size >> t.round) });
+    } else {
+      // draw → replay the same round with a fresh opponent of equal strength
+      this._setTournamentOpponent(room);
+      last.result = null;
+    }
+    room.game = buildEngine(room.gameType, room.config);
+    room.rematchVotes.clear();
+    room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
+    room.status = 'active';
+    this.startClock(room);
+    this.resetIdleTimer(room);
+    this.emitPerSeat(room, 'game:start', (s) => room.publicView(s));
+    this.maybeRunAI(room);
+  }
+
   getRoom(id) { return this.rooms.get(id); }
   getRoomByCode(code) {
     const id = this.codes.get((code || '').toUpperCase());
@@ -595,16 +689,21 @@ export class GameManager {
   pickAIAction(room, seat) {
     const diff = room.players[seat]?.aiDifficulty || room.aiDifficulty || 'normal';
     const persona = room.players[seat]?.personality || 'balanced';
-    switch (room.gameType) {
-      case 'chess': case 'chess4': case 'chesszade': return chooseChessAction(room.game, seat, diff, persona);
-      case 'tictactoe': return chooseTicTacToeAction(room.game, seat, diff, persona);
-      case 'gomoku': return chooseGomokuAction(room.game, seat, diff, persona);
-      case 'othello': return chooseOthelloAction(room.game, seat, diff, persona);
-      case 'dots': return chooseDotsAction(room.game, seat, diff, persona);
-      case 'backgammon': return chooseBackgammonAction(room.game, seat, diff, persona);
-      case 'hokm': return chooseHokmAction(room.game, seat, diff, persona);
-      case 'pasur': return choosePasurAction(room.game, seat, diff, persona);
-      default: return chooseAction(room.game, seat, diff, persona);
+    return this._chooseAI(room.game, room.gameType, seat, diff, persona);
+  }
+
+  /** Game-type-agnostic AI dispatch (also used to simulate bot-vs-bot matches). */
+  _chooseAI(game, gameType, seat, diff = 'normal', persona = 'balanced') {
+    switch (gameType) {
+      case 'chess': case 'chess4': case 'chesszade': return chooseChessAction(game, seat, diff, persona);
+      case 'tictactoe': return chooseTicTacToeAction(game, seat, diff, persona);
+      case 'gomoku': return chooseGomokuAction(game, seat, diff, persona);
+      case 'othello': return chooseOthelloAction(game, seat, diff, persona);
+      case 'dots': return chooseDotsAction(game, seat, diff, persona);
+      case 'backgammon': return chooseBackgammonAction(game, seat, diff, persona);
+      case 'hokm': return chooseHokmAction(game, seat, diff, persona);
+      case 'pasur': return choosePasurAction(game, seat, diff, persona);
+      default: return chooseAction(game, seat, diff, persona);
     }
   }
 
@@ -755,6 +854,20 @@ export class GameManager {
       else { room.series.intermission = true; room.series.readyVotes = new Set(); }
     }
 
+    // Knockout bookkeeping: record the round and (if alive) queue the next.
+    if (room.tournament && !room.tournament.done) {
+      this._scoreTournament(room, { winnerSeat, isDraw });
+      if (!room.tournament.done) { room.tournament.intermission = true; room.tournament.readyVotes = new Set(); }
+      if (room.tournament.done && room.tournament.champion === 0) {
+        const human = room.players[0];
+        if (human?.userId && Achievements.grant(human.userId, 'tournament_champ') && human.socketId) {
+          this.io.to(human.socketId).emit('achievement:earned', {
+            achievements: [{ code: 'tournament_champ', icon: '🏆', name: 'قهرمان تورنمنت', desc: 'یک تورنمنت حذفی را بردی.' }],
+          });
+        }
+      }
+    }
+
     this.broadcast(room, 'game:over', {
       winner: winnerSeat,
       winnerName: winnerPlayer?.name ?? null,
@@ -764,6 +877,7 @@ export class GameManager {
       elo: eloResult,
       gameElo,
       series: room.seriesView(),
+      tournament: room.tournamentView(),
       clock: room.clockView(),
       state: room.game.toState(),
     });

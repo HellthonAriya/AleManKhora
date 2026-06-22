@@ -47,6 +47,7 @@ export function GameView(roomId) {
   let rematchPending = false; // true after we vote for a rematch, until it starts
   let series = null;          // multi-game league state (null for single games)
   let seriesPending = false;  // true after we vote ready for the next series game
+  let tournament = null;      // knockout state (null otherwise)
   let myPrediction = null;    // spectator's predicted winner seat
   let overModalHandle = null; // handle to the open game-over popup, if any
   let drawWaitModal = null;   // our "waiting for opponent" draw popup (offerer side)
@@ -65,6 +66,7 @@ export function GameView(roomId) {
   const sideTop = h('div', { class: 'game-side' });
   const sideBottom = h('div', { class: 'game-side' });
   const seriesMount = h('div', {});
+  const tournamentMount = h('div', {});
   const clockEls = {};
 
   let renderer = null;
@@ -258,7 +260,36 @@ export function GameView(roomId) {
     renderPlayerCards();
     renderControls();
     renderSeriesPanel();
+    renderTournamentPanel();
     updateWallTray();
+  }
+
+  /** Knockout bracket progress panel (the human's path to the title). */
+  function renderTournamentPanel() {
+    clear(tournamentMount);
+    if (!tournament) return;
+    const roundLabel = (i) => {
+      const left = tournament.totalRounds - i;
+      return left === 1 ? 'فینال' : left === 2 ? 'نیمه‌نهایی' : left === 3 ? 'یک‌چهارم' : `دور ${faNum(i + 1)}`;
+    };
+    const card = h('div', { class: 'card series-card' },
+      h('div', { class: 'card-title' }, `🏆 تورنمنت حذفی (${faNum(tournament.size)} نفره)`));
+    const rounds = h('div', { class: 'bracket' });
+    for (let i = 0; i < tournament.totalRounds; i++) {
+      const p = tournament.path[i];
+      const state = !p ? 'todo' : p.result === 'win' ? 'win' : p.result === 'loss' ? 'loss' : i === tournament.round ? 'current' : 'todo';
+      rounds.append(h('div', { class: 'bracket-round ' + state },
+        h('span', { class: 'bracket-r' }, roundLabel(i)),
+        h('span', { class: 'bracket-vs' }, p ? `تو ⚔ ${p.opponent}` : '—'),
+        h('span', { class: 'bracket-res' },
+          p?.result === 'win' ? '✅' : p?.result === 'loss' ? '❌' : p?.result === 'draw' ? '🤝' : i === tournament.round ? '🎯' : '')));
+    }
+    card.append(rounds);
+    if (tournament.done) {
+      card.append(h('p', { style: 'font-weight:700;margin-top:8px;color:var(--accent)' },
+        tournament.champion === 0 ? '🎉 قهرمان شدی!' : '❌ حذف شدی.'));
+    }
+    tournamentMount.append(card);
   }
 
   /** Compact league scoreboard shown in the sidebar throughout a series. */
@@ -752,6 +783,7 @@ export function GameView(roomId) {
     numPlayers = v.numPlayers || v.players?.length || 2;
     aiSeats = v.aiSeats || []; status = v.status; code = v.code;
     if (v.series !== undefined) series = v.series;
+    if (v.tournament !== undefined) tournament = v.tournament;
     gameType = v.gameType || config?.gameType || 'quoridor';
     isChess = gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade';
     if (v.clock) setClock(v.clock);
@@ -821,13 +853,16 @@ export function GameView(roomId) {
     'game:over': (data) => {
       state = data.state; status = 'finished';
       if (data.series !== undefined) series = data.series;
+      if (data.tournament !== undefined) tournament = data.tournament;
       if (data.clock) setClock({ ...data.clock, running: false });
       syncRenderer();
       if (!spectator) {
         const iWon = data.winner === seat || (config?.teams && data.winner != null && data.winner % 2 === seat % 2);
         playSound(data.draw ? 'notify' : iWon ? 'win' : 'lose');
       }
-      if (data.series) showSeriesStandings(data); else showGameOver(data);
+      if (data.tournament) showTournamentStandings(data);
+      else if (data.series) showSeriesStandings(data);
+      else showGameOver(data);
     },
   };
   for (const [ev, fn] of Object.entries(handlers)) socket.on(ev, fn);
@@ -944,6 +979,30 @@ export function GameView(roomId) {
     });
   }
 
+  /** Between-rounds (and final) popup for a knockout tournament. */
+  function showTournamentStandings(data) {
+    if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
+    const tv = data.tournament;
+    const iWon = data.winner === seat;
+    let title, headline;
+    if (tv.done && tv.champion === 0) { title = '🏆 قهرمان تورنمنت!'; headline = 'همهٔ حریف‌ها را شکست دادی و قهرمان شدی! 🎉'; }
+    else if (tv.done) { title = 'پایان تورنمنت'; headline = 'در این دور حذف شدی. دفعهٔ بعد!'; }
+    else if (data.draw) { title = 'مساوی'; headline = 'این دور مساوی شد — دوباره بازی می‌کنی.'; }
+    else { title = iWon ? '✅ به دور بعد رفتی!' : 'پایان بازی'; headline = iWon ? 'یک قدم به قهرمانی نزدیک‌تر شدی.' : 'حذف شدی.'; }
+
+    const actions = [{ label: 'بازگشت به سالن', class: 'btn-ghost', onClick: () => navigate('/lobby') }];
+    if (!tv.done && !spectator) {
+      const label = data.draw ? '🔁 بازی دوباره' : '▶ دور بعد';
+      actions.push({ label, class: 'btn-primary', onClick: () => { socket.emit('tournament:next'); return true; } });
+    }
+    overModalHandle = modal({
+      title,
+      body: h('div', { class: 'center' }, h('p', { style: 'font-size:1.05rem' }, headline)),
+      actions,
+      onClose: () => { overModalHandle = null; },
+    });
+  }
+
   function drawReasonText(reason) {
     return reason === 'stalemate' ? 'پات (بدون حرکت مجاز و بدون کیش).'
       : reason === 'fifty' ? 'قانون ۵۰ حرکت.'
@@ -1009,7 +1068,7 @@ export function GameView(roomId) {
   const soundBtn = h('button', { class: 'btn btn-sm btn-ghost', title: 'صدا',
     onclick: () => { const m = toggleSound(); soundBtn.textContent = m ? '🔇 صدا' : '🔊 صدا'; } },
     isSoundMuted() ? '🔇 صدا' : '🔊 صدا');
-  sideTop.append(seriesMount, playerCardsMount, controlsMount);
+  sideTop.append(tournamentMount, seriesMount, playerCardsMount, controlsMount);
   sideBottom.append(
     h('div', { class: 'card' },
       h('div', { class: 'card-title' }, '💬 گفتگو'),
