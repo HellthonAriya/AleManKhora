@@ -265,6 +265,15 @@ export const GameStats = {
    * Head-to-head record between two users across all finished games where both
    * occupied a seat. Returns wins/losses/draws from `userId`'s perspective.
    */
+  /** Update and return a user's overall win streak after one finished game. */
+  bumpStreak(userId, won) {
+    if (!userId) return 0;
+    const row = db.prepare('SELECT win_streak FROM users WHERE id=?').get(userId);
+    const next = won ? (row?.win_streak || 0) + 1 : 0;
+    db.prepare('UPDATE users SET win_streak=? WHERE id=?').run(next, userId);
+    return next;
+  },
+
   headToHead(userId, opponentId) {
     if (!userId || !opponentId) return { wins: 0, losses: 0, draws: 0, total: 0 };
     const rows = db.prepare(
@@ -281,5 +290,26 @@ export const GameStats = {
       else draws++; // a third party won (4-player) — neutral for this pair
     }
     return { wins, losses, draws, total: rows.length };
+  },
+};
+
+/* ----------------------------- Achievements ------------------------------- */
+
+export const Achievements = {
+  earnedCodes(userId) {
+    if (!userId) return [];
+    return db.prepare('SELECT code FROM achievements WHERE user_id=?').all(userId).map((r) => r.code);
+  },
+  earned(userId) {
+    if (!userId) return [];
+    return db.prepare('SELECT code, earned_at FROM achievements WHERE user_id=? ORDER BY earned_at DESC').all(userId);
+  },
+  /** Insert if absent; returns true when newly granted. */
+  grant(userId, code) {
+    if (!userId) return false;
+    const info = db.prepare(
+      'INSERT OR IGNORE INTO achievements(user_id, code, earned_at) VALUES(?,?,?)'
+    ).run(userId, code, Date.now());
+    return info.changes > 0;
   },
 };

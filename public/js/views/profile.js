@@ -1,6 +1,7 @@
 /* اَلِ من خورا — Profile & account settings */
 import { h, api, store, toast, faNum, timeAgo, initials, applyTheme, PLAYER_COLORS, THEMES } from '../core.js';
 import { refreshMe } from '../app.js';
+import { ACHIEVEMENTS, ACHIEVEMENT_MAP } from '../achievements.js';
 
 const GAME_NAMES = {
   quoridor: '🧱 اَلِ من خورا', chess: '♛ شطرنج', chess4: '♞ شطرنج ۴ نفره',
@@ -21,7 +22,7 @@ export async function ProfileView(username) {
   }
 
   try {
-    const { user, recent, gameStats } = await api(`/profile/${encodeURIComponent(target)}`);
+    const { user, recent, gameStats, achievements } = await api(`/profile/${encodeURIComponent(target)}`);
     mount.innerHTML = '';
     const isMe = store.isLoggedIn && store.me.id === user.id;
     const winRate = user.gamesPlayed ? Math.round((user.wins / user.gamesPlayed) * 100) : 0;
@@ -47,6 +48,24 @@ export async function ProfileView(username) {
         ),
       ),
     );
+
+    // achievements / badges
+    {
+      const earnedAt = {};
+      (achievements || []).forEach((a) => { earnedAt[a.code] = a.earned_at; });
+      const earnedCount = Object.keys(earnedAt).length;
+      const grid = h('div', { class: 'badge-grid' });
+      ACHIEVEMENTS.forEach((a) => {
+        const got = earnedAt[a.code] != null;
+        grid.append(h('div', { class: 'badge-tile' + (got ? ' got' : ''), title: a.desc },
+          h('div', { class: 'badge-ico' }, a.icon),
+          h('div', { class: 'badge-name' }, a.name),
+          h('div', { class: 'badge-desc faint' }, got ? `🔓 ${timeAgo(earnedAt[a.code])}` : a.desc)));
+      });
+      mount.append(h('div', { class: 'card', style: 'margin-top:20px' },
+        h('div', { class: 'card-title' }, `🏅 دستاوردها (${faNum(earnedCount)} از ${faNum(ACHIEVEMENTS.length)})`),
+        grid));
+    }
 
     // per-game stats
     if (gameStats && gameStats.length) {

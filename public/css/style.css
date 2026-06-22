@@ -303,6 +303,15 @@ input, select, textarea { font-family: inherit; }
   100% { transform: translate(var(--drift, 0), -78%) scale(1); opacity: 0; }
 }
 
+/* Achievements / badges */
+.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 12px; }
+.badge-tile { text-align: center; padding: 12px 8px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,.02); opacity: .5; filter: grayscale(1); transition: transform .12s ease; }
+.badge-tile.got { opacity: 1; filter: none; background: linear-gradient(160deg, rgba(19,192,138,.14), rgba(255,255,255,.03)); border-color: rgba(19,192,138,.4); }
+.badge-tile.got:hover { transform: translateY(-3px); }
+.badge-ico { font-size: 2rem; line-height: 1; }
+.badge-name { font-weight: 700; margin-top: 6px; font-size: .9rem; }
+.badge-desc { font-size: .7rem; margin-top: 3px; }
+
 /* League / series */
 .series-games { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
 .series-chip { font-size: .74rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }

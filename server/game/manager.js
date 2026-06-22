@@ -24,7 +24,8 @@ import { chooseDotsAction } from './dotsAI.js';
 import { chooseBackgammonAction } from './backgammonAI.js';
 import { chooseHokmAction } from './hokmAI.js';
 import { choosePasurAction } from './pasurAI.js';
-import { Games, GameStats, applyEloResult, applyEloDraw } from '../models.js';
+import { Games, GameStats, Achievements, applyEloResult, applyEloDraw } from '../models.js';
+import { evaluateAchievements, ACHIEVEMENT_MAP } from '../../public/js/achievements.js';
 import db, { getSettings } from '../db.js';
 
 const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'hokm', 'pasur'];
@@ -630,6 +631,37 @@ export class GameManager {
     return true;
   }
 
+  /** Evaluate & grant any newly-earned achievements for one human player and
+   *  push a toast to their socket. Best-effort; never throws into game flow. */
+  _awardAchievements(player, { gameType, result, gameSweep }) {
+    const won = result === 'win';
+    const winStreak = GameStats.bumpStreak(player.userId, won);
+    const stats = GameStats.forUser(player.userId);
+    let totalPlayed = 0, totalWins = 0, distinctGamesWon = 0;
+    const gameWins = {};
+    for (const r of stats) {
+      totalPlayed += r.played; totalWins += r.wins;
+      gameWins[r.game_type] = r.wins;
+      if (r.wins >= 1) distinctGamesWon++;
+    }
+    const ctx = {
+      totalPlayed, totalWins, gameWins, distinctGamesWon, winStreak,
+      gameType, won, draw: result === 'draw', hokmSweep: won && gameSweep,
+    };
+    const already = new Set(Achievements.earnedCodes(player.userId));
+    const fresh = [];
+    for (const code of evaluateAchievements(ctx)) {
+      if (already.has(code)) continue;
+      if (Achievements.grant(player.userId, code)) {
+        const def = ACHIEVEMENT_MAP[code];
+        fresh.push({ code, icon: def?.icon || '🏆', name: def?.name || code, desc: def?.desc || '' });
+      }
+    }
+    if (fresh.length && player.socketId) {
+      this.io.to(player.socketId).emit('achievement:earned', { achievements: fresh });
+    }
+  }
+
   /** Remove a player from a live game (resign / timeout / abandon). */
   playerOut(room, seat, reason = 'resign') {
     if (room.status !== 'active') return;
@@ -747,10 +779,23 @@ export class GameManager {
       return seat === winnerSeat ? 'win' : 'loss';
     };
 
+    // Did the winning side sweep every trick (Hokm کوت)?
+    let gameSweep = false;
+    if (gameType === 'hokm') {
+      const st = room.game;
+      if (teams && Array.isArray(st.teamTricks) && winningTeam != null) {
+        gameSweep = st.teamTricks[1 - winningTeam] === 0;
+      } else if (winnerSeat != null && Array.isArray(st.tricksWon)) {
+        gameSweep = st.tricksWon.every((t, i) => (i === winnerSeat ? true : t === 0));
+      }
+    }
+
     for (let s = 0; s < room.players.length; s++) {
       const p = room.players[s];
       if (!p || p.isAI || !p.userId) continue;
-      GameStats.record({ userId: p.userId, gameType, result: resultFor(s) });
+      const result = resultFor(s);
+      GameStats.record({ userId: p.userId, gameType, result });
+      try { this._awardAchievements(p, { gameType, result, gameSweep }); } catch { /* ignore */ }
     }
 
     // Per-game rating only makes sense in a head-to-head 2-player game.

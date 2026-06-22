@@ -712,6 +712,12 @@ export function GameView(roomId) {
       toast(msg, 'success');
     },
     'series:ready': ({ votes }) => toast(`آمادهٔ بازی بعد (${faNum(votes.length)})`),
+    'achievement:earned': ({ achievements }) => {
+      (achievements || []).forEach((a, i) => setTimeout(() => {
+        toast(`${a.icon} دستاورد جدید: ${a.name}`, 'success');
+        playSound('achievement');
+      }, i * 900));
+    },
     'room:update': (v) => applyView(v),
     'game:update': ({ state: s }) => {
       state = s; syncRenderer();

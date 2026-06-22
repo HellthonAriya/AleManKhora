@@ -3,7 +3,7 @@
  */
 import express from 'express';
 import { customAlphabet } from 'nanoid';
-import { Users, Games, GameStats } from '../models.js';
+import { Users, Games, GameStats, Achievements } from '../models.js';
 import { getSettings } from '../db.js';
 import {
   setAuthCookie, clearAuthCookie, requireAuth, requireUser,
@@ -108,7 +108,8 @@ router.get('/profile/:username', (req, res) => {
     result: g.winner_id === row.id ? 'win' : (g.winner_id ? 'loss' : 'draw'),
   }));
   const gameStats = GameStats.forUser(row.id);
-  res.json({ user, recent, gameStats });
+  const achievements = Achievements.earned(row.id);
+  res.json({ user, recent, gameStats, achievements });
 });
 
 /** Head-to-head record between the signed-in user and another player. */

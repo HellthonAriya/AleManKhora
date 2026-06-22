@@ -66,9 +66,17 @@ CREATE TABLE IF NOT EXISTS game_stats (
   PRIMARY KEY (user_id, game_type)
 );
 
+CREATE TABLE IF NOT EXISTS achievements (
+  user_id   INTEGER NOT NULL,
+  code      TEXT NOT NULL,
+  earned_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, code)
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_elo ON users(elo DESC);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_gamestats_user ON game_stats(user_id);
+CREATE INDEX IF NOT EXISTS idx_ach_user ON achievements(user_id);
 `);
 
 /* --------------------------- Schema migrations ---------------------------- */
@@ -82,6 +90,10 @@ addCol('p3_id', 'INTEGER');
 addCol('p2_name', 'TEXT');
 addCol('p3_name', 'TEXT');
 addCol('game_type', 'TEXT'); // denormalized from config for stats/head-to-head
+
+// Overall win streak on the user (for streak achievements).
+const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (!userCols.includes('win_streak')) db.exec('ALTER TABLE users ADD COLUMN win_streak INTEGER NOT NULL DEFAULT 0');
 
 /* --------------------------- Default settings ----------------------------- */
 const DEFAULT_SETTINGS = {
