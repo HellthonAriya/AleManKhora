@@ -21,11 +21,14 @@ const TRUMP_MS  = 1300;
 const FLY_DUR   = 300;    // ms: card flies from seat to centre
 const SHAKE_DUR = 480;    // ms: canvas shake after trump chosen
 
-const OPP_CY_TOP  = 0.175;
-const OPP_CX_SIDE = 0.09;
-const OPP_CY_SIDE = 0.48;
-const TRICK_OFF   = 0.155;
-const HAND_BASE_Y = 0.765;
+// Vertical layout anchors are fractions of the canvas HEIGHT (H), horizontal
+// anchors are fractions of the WIDTH (S). The board is taller than wide.
+const OPP_CY_TOP  = 0.135;   // ×H — top opponent row
+const OPP_CX_SIDE = 0.085;   // ×S — left/right opponent columns
+const OPP_CY_SIDE = 0.44;    // ×H — left/right opponent vertical centre
+const TABLE_CY    = 0.50;    // ×H — centre of the trick area
+const TRICK_OFF   = 0.150;   // ×S — spread of trick cards from centre
+const HAND_BASE_Y = 0.80;    // ×H — top edge of my hand
 
 export class HokmRenderer {
   constructor(canvas, { onAction } = {}) {
@@ -146,26 +149,28 @@ export class HokmRenderer {
 
   /** Screen-centre of where a seat's cards live (for fly-from). */
   _seatPos(where, S, CH) {
+    const H = this.cssH || S;
     switch (where) {
-      case 'bottom':    return { x: S / 2,              y: S * HAND_BASE_Y + CH / 2 };
-      case 'top':       return { x: S / 2,              y: S * OPP_CY_TOP };
-      case 'topleft':   return { x: S * 0.25,           y: S * OPP_CY_TOP };
-      case 'topright':  return { x: S * 0.75,           y: S * OPP_CY_TOP };
-      case 'left':      return { x: S * OPP_CX_SIDE,    y: S * OPP_CY_SIDE };
-      default:          return { x: S * (1-OPP_CX_SIDE), y: S * OPP_CY_SIDE };
+      case 'bottom':    return { x: S / 2,              y: H * HAND_BASE_Y + CH / 2 };
+      case 'top':       return { x: S / 2,              y: H * OPP_CY_TOP };
+      case 'topleft':   return { x: S * 0.25,           y: H * OPP_CY_TOP };
+      case 'topright':  return { x: S * 0.75,           y: H * OPP_CY_TOP };
+      case 'left':      return { x: S * OPP_CX_SIDE,    y: H * OPP_CY_SIDE };
+      default:          return { x: S * (1-OPP_CX_SIDE), y: H * OPP_CY_SIDE };
     }
   }
 
   /** Screen-centre of where a trick card from this seat lands. */
   _trickPos(where, S) {
-    const c = S / 2, off = S * TRICK_OFF;
+    const H = this.cssH || S;
+    const cx = S / 2, cy = H * TABLE_CY, off = S * TRICK_OFF;
     switch (where) {
-      case 'bottom':    return { x: c,       y: c + off };
-      case 'top':       return { x: c,       y: c - off };
-      case 'topleft':   return { x: c - off, y: c - off * 0.6 };
-      case 'topright':  return { x: c + off, y: c - off * 0.6 };
-      case 'left':      return { x: c - off, y: c };
-      default:          return { x: c + off, y: c };
+      case 'bottom':    return { x: cx,       y: cy + off };
+      case 'top':       return { x: cx,       y: cy - off };
+      case 'topleft':   return { x: cx - off, y: cy - off * 0.6 };
+      case 'topright':  return { x: cx + off, y: cy - off * 0.6 };
+      case 'left':      return { x: cx - off, y: cy };
+      default:          return { x: cx + off, y: cy };
     }
   }
 
@@ -294,7 +299,7 @@ export class HokmRenderer {
     const OVER = 18;
     const th = tableTheme(this.config.boardTheme);
     this._rr(-OVER, -OVER, S + OVER * 2, H + OVER * 2, 16); ctx.fillStyle = th.edge; ctx.fill();
-    this._rr(S * 0.03, S * 0.03, S * 0.94, S * 0.94, S * 0.47); ctx.fillStyle = th.felt; ctx.fill();
+    this._rr(S * 0.03, S * 0.03, S * 0.94, H - S * 0.06, S * 0.22); ctx.fillStyle = th.felt; ctx.fill();
 
     this.hand = []; this.trumpBtns = [];
     if (!this.state) { ctx.restore(); return; }
@@ -309,7 +314,7 @@ export class HokmRenderer {
       if (winner != null) {
         const where = place[winner];
         const to = this._pilePos(where, S, H);
-        this._trickPileAnims.push({ winner, from: { x: S / 2, y: S * 0.50 }, to, t0: now, dur: 540 });
+        this._trickPileAnims.push({ winner, from: { x: S / 2, y: H * TABLE_CY }, to, t0: now, dur: 540 });
       }
       this._pendingCollect = null;
       this._ensureAnim();
@@ -430,13 +435,14 @@ export class HokmRenderer {
     const tricks  = st.tricksWon?.[seat] ?? 0;
     const count   = st.handCounts?.[seat] ?? 0;
 
+    const H = this.cssH || S;
     let cx, cy, horizontal = true;
     switch (where) {
-      case 'top':       cx = S / 2;              cy = S * OPP_CY_TOP;  break;
-      case 'topleft':   cx = S * 0.25;           cy = S * OPP_CY_TOP;  break;
-      case 'topright':  cx = S * 0.75;           cy = S * OPP_CY_TOP;  break;
-      case 'left':      cx = S * OPP_CX_SIDE;    cy = S * OPP_CY_SIDE; horizontal = false; break;
-      default:          cx = S*(1-OPP_CX_SIDE);  cy = S * OPP_CY_SIDE; horizontal = false; break;
+      case 'top':       cx = S / 2;              cy = H * OPP_CY_TOP;  break;
+      case 'topleft':   cx = S * 0.25;           cy = H * OPP_CY_TOP;  break;
+      case 'topright':  cx = S * 0.75;           cy = H * OPP_CY_TOP;  break;
+      case 'left':      cx = S * OPP_CX_SIDE;    cy = H * OPP_CY_SIDE; horizontal = false; break;
+      default:          cx = S*(1-OPP_CX_SIDE);  cy = H * OPP_CY_SIDE; horizontal = false; break;
     }
 
     const shown = Math.min(count, 7), gap = CW * 0.30, span = (shown - 1) * gap;
@@ -475,14 +481,15 @@ export class HokmRenderer {
 
   /* ── Trick cards ────────────────────────────────────────────────────── */
   _drawTrickCard(ctx, S, where, card, CW, CH, isWinner) {
-    const c = S / 2, off = S * TRICK_OFF;
-    let x = c, y = c;
-    if      (where === 'bottom')   { y = c + off; }
-    else if (where === 'top')      { y = c - off; }
-    else if (where === 'topleft')  { x = c - off; y = c - off * 0.6; }
-    else if (where === 'topright') { x = c + off; y = c - off * 0.6; }
-    else if (where === 'left')     { x = c - off; }
-    else                           { x = c + off; }
+    const H = this.cssH || S;
+    const cx = S / 2, cy = H * TABLE_CY, off = S * TRICK_OFF;
+    let x = cx, y = cy;
+    if      (where === 'bottom')   { y = cy + off; }
+    else if (where === 'top')      { y = cy - off; }
+    else if (where === 'topleft')  { x = cx - off; y = cy - off * 0.6; }
+    else if (where === 'topright') { x = cx + off; y = cy - off * 0.6; }
+    else if (where === 'left')     { x = cx - off; }
+    else                           { x = cx + off; }
     if (isWinner) {
       ctx.save();
       ctx.shadowColor = GOLD; ctx.shadowBlur = 22;
@@ -493,14 +500,15 @@ export class HokmRenderer {
   }
 
   _winnerBadge(ctx, S, where, st, seat) {
-    const c = S / 2, off = S * TRICK_OFF + S * 0.14;
-    let x = c, y = c;
-    if      (where === 'bottom')   { y = c + off; }
-    else if (where === 'top')      { y = c - off; }
-    else if (where === 'topleft')  { x = c - off; y = c - off * 0.6; }
-    else if (where === 'topright') { x = c + off; y = c - off * 0.6; }
-    else if (where === 'left')     { x = c - off; }
-    else                           { x = c + off; }
+    const H = this.cssH || S;
+    const cx = S / 2, cy = H * TABLE_CY, off = S * TRICK_OFF + S * 0.14;
+    let x = cx, y = cy;
+    if      (where === 'bottom')   { y = cy + off; }
+    else if (where === 'top')      { y = cy - off; }
+    else if (where === 'topleft')  { x = cx - off; y = cy - off * 0.6; }
+    else if (where === 'topright') { x = cx + off; y = cy - off * 0.6; }
+    else if (where === 'left')     { x = cx - off; }
+    else                           { x = cx + off; }
     const w = S * 0.22, h = S * 0.055, pulse = 0.5 + 0.5 * Math.sin(ts() / 180);
     ctx.save(); ctx.globalAlpha = 0.88 + 0.12 * pulse;
     this._rr(x - w / 2, y - h / 2, w, h, h / 2);
@@ -522,7 +530,8 @@ export class HokmRenderer {
     const spacing = Math.min(CW * 0.90, (maxSpan - CW) / Math.max(1, sorted.length - 1));
     const totalW  = CW + (sorted.length - 1) * spacing;
     const startX  = (S - totalW) / 2;
-    const baseY   = S * HAND_BASE_Y;
+    const H       = this.cssH || S;
+    const baseY   = H * HAND_BASE_Y;
     sorted.forEach((card, i) => {
       const isLegal = !legal || legal.has(`${card.s},${card.r}`);
       const lift    = (this.hover === i && isLegal) ? S * 0.028 : 0;
@@ -534,7 +543,7 @@ export class HokmRenderer {
     });
     // Status strip below my cards
     const ySub = baseY + CH + S * 0.016;
-    if (ySub < S * 0.97) {
+    if (ySub < H * 0.99) {
       const myActive = st.turn === this.mySeat && st.winner == null && st.phase === 'play';
       ctx.fillStyle = myActive ? GOLD : 'rgba(255,255,255,.75)';
       ctx.font = `${S * 0.028}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -548,14 +557,13 @@ export class HokmRenderer {
 
   /* ── Trick pile geometry ────────────────────────────────────────────── */
   _pilePos(where, S, H) {
-    const mw = S * 0.065, mh = mw * 1.40;
     switch (where) {
-      case 'bottom':   return { x: S * 0.87, y: H - mh * 0.6 - S * 0.03 };
-      case 'top':      return { x: S * 0.13, y: S * 0.175 };
-      case 'topleft':  return { x: S * 0.09, y: S * 0.10 };
-      case 'topright': return { x: S * 0.91, y: S * 0.10 };
-      case 'left':     return { x: S * 0.065, y: S * 0.78 };
-      default:         return { x: S * 0.935, y: S * 0.78 };
+      case 'bottom':   return { x: S * 0.90, y: H * 0.875 };  // beside my hand
+      case 'top':      return { x: S * 0.12, y: H * 0.10 };   // top-left corner
+      case 'topleft':  return { x: S * 0.07, y: H * 0.07 };
+      case 'topright': return { x: S * 0.93, y: H * 0.07 };
+      case 'left':     return { x: S * 0.06, y: H * 0.66 };   // below left opponent
+      default:         return { x: S * 0.94, y: H * 0.66 };   // below right opponent
     }
   }
 
@@ -607,8 +615,9 @@ export class HokmRenderer {
 
   /* ── Trump chooser overlay ──────────────────────────────────────────── */
   _drawTrumpChooser(ctx, S, st) {
+    const H = this.cssH || S;
     const choosing = st.hakem === this.mySeat && this.interactive;
-    const ow = S * 0.68, oh = S * 0.26, ox = (S - ow) / 2, oy = (S - oh) / 2;
+    const ow = S * 0.68, oh = S * 0.26, ox = (S - ow) / 2, oy = (H - oh) / 2;
     this._rr(ox, oy, ow, oh, 14); ctx.fillStyle = 'rgba(8,16,12,.93)'; ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = `bold ${S * 0.042}px sans-serif`;
@@ -631,20 +640,22 @@ export class HokmRenderer {
 
   /* ── Trump burst effect ─────────────────────────────────────────────── */
   _drawTrumpBurst(ctx, S, suit, now) {
+    const H    = this.cssH || S;
+    const cy   = H * TABLE_CY;
     const t    = 1 - Math.max(0, (this.trumpFxUntil - now) / TRUMP_MS);
     const ease = 1 - Math.pow(1 - t, 3);
     const alpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
     ctx.save(); ctx.globalAlpha = Math.max(0, alpha) * 0.88;
-    ctx.beginPath(); ctx.arc(S / 2, S / 2, S * (0.07 + ease * 0.30), 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(S / 2, cy, S * (0.07 + ease * 0.30), 0, Math.PI * 2);
     ctx.strokeStyle = SUIT_COLOR[suit]; ctx.lineWidth = 5 * (1 - ease) + 1; ctx.stroke();
     ctx.globalAlpha = Math.max(0, alpha);
     ctx.fillStyle = SUIT_COLOR[suit];
     ctx.shadowColor = SUIT_COLOR[suit]; ctx.shadowBlur = 24 * (1 - ease) + 6;
     ctx.font = `bold ${S * (0.12 + ease * 0.13)}px serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(SUIT[suit], S / 2, S * 0.46);
+    ctx.fillText(SUIT[suit], S / 2, cy - S * 0.04);
     ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.font = `bold ${S * 0.044}px sans-serif`;
-    ctx.fillText(`حکم: ${SUIT_NAME[suit]}`, S / 2, S * 0.58);
+    ctx.fillText(`حکم: ${SUIT_NAME[suit]}`, S / 2, cy + S * 0.08);
     ctx.restore();
   }
 
