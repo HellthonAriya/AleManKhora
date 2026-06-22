@@ -41,7 +41,10 @@ function cloneApply(game, player, action) {
  * @param {'easy'|'normal'|'hard'} difficulty
  * @returns {object} action
  */
-export function chooseAction(game, me, difficulty = 'normal') {
+export function chooseAction(game, me, difficulty = 'normal', personality = 'balanced') {
+  // Personality shifts the run-vs-wall balance: aggressive bots sprint for the
+  // goal and rarely wall; defensive bots love throwing up walls.
+  const wallBias = personality === 'defensive' ? 1.6 : personality === 'aggressive' ? -1.6 : 0;
   // Nearest active opponent (used as the target for blocking walls).
   let opp = -1; let oppBest = Infinity;
   for (const p of game.activePlayers()) {
@@ -64,9 +67,10 @@ export function chooseAction(game, me, difficulty = 'normal') {
     }
   }
 
-  // Easy bot: just advance, rarely place walls.
+  // Easy bot: just advance, rarely place walls (defensive walls more often).
   if (difficulty === 'easy') {
-    if (game.wallsLeft[me] > 0 && Math.random() < 0.15) {
+    const wallChance = personality === 'defensive' ? 0.4 : personality === 'aggressive' ? 0.04 : 0.15;
+    if (game.wallsLeft[me] > 0 && Math.random() < wallChance) {
       const walls = game.allWallPlacements(me);
       if (walls.length) return walls[Math.floor(Math.random() * walls.length)];
     }
@@ -100,7 +104,7 @@ export function chooseAction(game, me, difficulty = 'normal') {
   // 3) Decide between advancing and walling.
   const noise = difficulty === 'hard' ? 0 : (Math.random() - 0.5) * 1.5;
   const moveVal = bestMoveScore + noise;
-  const wallVal = bestWallScore;
+  const wallVal = bestWallScore + wallBias;
 
   if (bestWall && wallVal > moveVal) return bestWall;
   return bestMove ?? game.legalMoves(me)[0] ?? null;

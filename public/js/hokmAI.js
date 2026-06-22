@@ -57,7 +57,7 @@ function liveBossRank(suit, seen) {
   return 0;
 }
 
-export function chooseHokmAction(game, seat, difficulty = 'normal') {
+export function chooseHokmAction(game, seat, difficulty = 'normal', personality = 'balanced') {
   try {
     if (!game) return null;
 
@@ -106,10 +106,12 @@ export function chooseHokmAction(game, seat, difficulty = 'normal') {
           return toAction(bosses[0]);
         }
       }
+      // Defensive personality conserves high cards — leads its lowest non-trump.
+      if (personality === 'defensive' && nonTrump.length) return toAction(lowest(nonTrump));
       // Lead an Ace of a non-trump suit if held.
       const aces = nonTrump.filter((c) => c.r === 14);
       if (aces.length) return toAction(highest(aces));
-      // Else a high non-trump card.
+      // Else a high non-trump card (aggressive always reaches for the highest).
       if (nonTrump.length) {
         const high = nonTrump.filter((c) => c.r >= 12);
         if (high.length) return toAction(highest(high));

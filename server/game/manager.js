@@ -261,7 +261,7 @@ class Room {
       numPlayers: this.numPlayers,
       status: this.status,
       players: this.players.map((p) =>
-        p ? { name: p.name, color: p.color, userId: p.userId, connected: p.connected, elo: p.elo, isAI: !!p.isAI } : null
+        p ? { name: p.name, color: p.color, userId: p.userId, connected: p.connected, elo: p.elo, isAI: !!p.isAI, personality: p.personality || null } : null
       ),
       aiSeats: [...this.aiSeats],
       spectators: this.spectators.size,
@@ -332,23 +332,26 @@ export class GameManager {
   }
 
   /** Build a bot player object for a given seat. */
-  _makeBot(room, seat, difficulty) {
+  _makeBot(room, seat, difficulty, personality) {
+    const PERSONAS = { balanced: '', aggressive: ' ⚔️', defensive: ' 🛡️' };
+    const persona = ['balanced', 'aggressive', 'defensive'].includes(personality) ? personality : 'balanced';
     return {
       socketId: null, userId: null, guestId: null,
-      name: room.numPlayers > 2 ? `هوش مصنوعی ${seat}` : 'هوش مصنوعی',
+      name: (room.numPlayers > 2 ? `هوش مصنوعی ${seat}` : 'هوش مصنوعی') + (PERSONAS[persona] || ''),
       color: room.config.colors[seat], connected: true, elo: '—', isAI: true,
       aiDifficulty: ['easy', 'normal', 'hard'].includes(difficulty) ? difficulty : 'normal',
+      personality: persona,
     };
   }
 
   /** Seat a bot at a specific empty seat (host-managed mixed rooms). Seat 0 is
    *  reserved for the host, so bots only fill seats >= 1. Returns true on success. */
-  addBot(room, seat, difficulty) {
+  addBot(room, seat, difficulty, personality) {
     if (room.status !== 'waiting') return false;
     seat = parseInt(seat, 10);
     if (!Number.isInteger(seat) || seat < 1 || seat >= room.numPlayers) return false;
     if (room.players[seat]) return false; // occupied
-    room.players[seat] = this._makeBot(room, seat, difficulty);
+    room.players[seat] = this._makeBot(room, seat, difficulty, personality);
     room.aiSeats.add(seat);
     return true;
   }
@@ -365,10 +368,10 @@ export class GameManager {
   }
 
   /** Fill the highest `count` empty seats with bots (used at room creation). */
-  fillBots(room, count, difficulty) {
+  fillBots(room, count, difficulty, personality) {
     let added = 0;
     for (let s = room.numPlayers - 1; s >= 1 && added < count; s--) {
-      if (!room.players[s] && this.addBot(room, s, difficulty)) added++;
+      if (!room.players[s] && this.addBot(room, s, difficulty, personality)) added++;
     }
     return added;
   }
@@ -591,16 +594,17 @@ export class GameManager {
    *  own difficulty (mixed rooms); fall back to the room-wide difficulty. */
   pickAIAction(room, seat) {
     const diff = room.players[seat]?.aiDifficulty || room.aiDifficulty || 'normal';
+    const persona = room.players[seat]?.personality || 'balanced';
     switch (room.gameType) {
-      case 'chess': case 'chess4': case 'chesszade': return chooseChessAction(room.game, seat, diff);
-      case 'tictactoe': return chooseTicTacToeAction(room.game, seat, diff);
-      case 'gomoku': return chooseGomokuAction(room.game, seat, diff);
-      case 'othello': return chooseOthelloAction(room.game, seat, diff);
-      case 'dots': return chooseDotsAction(room.game, seat, diff);
-      case 'backgammon': return chooseBackgammonAction(room.game, seat, diff);
-      case 'hokm': return chooseHokmAction(room.game, seat, diff);
-      case 'pasur': return choosePasurAction(room.game, seat, diff);
-      default: return chooseAction(room.game, seat, diff);
+      case 'chess': case 'chess4': case 'chesszade': return chooseChessAction(room.game, seat, diff, persona);
+      case 'tictactoe': return chooseTicTacToeAction(room.game, seat, diff, persona);
+      case 'gomoku': return chooseGomokuAction(room.game, seat, diff, persona);
+      case 'othello': return chooseOthelloAction(room.game, seat, diff, persona);
+      case 'dots': return chooseDotsAction(room.game, seat, diff, persona);
+      case 'backgammon': return chooseBackgammonAction(room.game, seat, diff, persona);
+      case 'hokm': return chooseHokmAction(room.game, seat, diff, persona);
+      case 'pasur': return choosePasurAction(room.game, seat, diff, persona);
+      default: return chooseAction(room.game, seat, diff, persona);
     }
   }
 

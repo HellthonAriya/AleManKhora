@@ -454,27 +454,35 @@ export function GameView(roomId) {
     if (!manageable) return null;
 
     let botDifficulty = 'normal';
+    let botPersonality = 'balanced';
     const diffSeg = h('div', { class: 'seg', style: 'margin:6px 0' });
     [['easy', 'آسان'], ['normal', 'متوسط'], ['hard', 'سخت']].forEach(([v, l]) => {
       const b = h('button', { class: v === botDifficulty ? 'active' : '' }, l);
       b.addEventListener('click', () => { botDifficulty = v; [...diffSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
       diffSeg.append(b);
     });
+    const personaSeg = h('div', { class: 'seg', style: 'margin:6px 0' });
+    [['balanced', 'متعادل'], ['aggressive', '⚔️ تهاجمی'], ['defensive', '🛡️ تدافعی']].forEach(([v, l]) => {
+      const b = h('button', { class: v === botPersonality ? 'active' : '' }, l);
+      b.addEventListener('click', () => { botPersonality = v; [...personaSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
+      personaSeg.append(b);
+    });
 
     const card = h('div', { class: 'card', style: 'margin-top:14px' },
       h('div', { class: 'card-title' }, '🤖 صندلی‌ها و بات‌ها'),
-      h('div', { class: 'opt-group' }, h('label', {}, 'سطح سختی بات جدید'), diffSeg));
+      h('div', { class: 'opt-group' }, h('label', {}, 'سطح سختی بات جدید'), diffSeg),
+      h('div', { class: 'opt-group' }, h('label', {}, 'شخصیت بات جدید'), personaSeg));
 
     for (let s = 1; s < numPlayers; s++) {
       const p = players[s];
       const teamTag = config?.teams ? ` · ${TEAM_NAMES[s % 2]}` : '';
       const label = h('div', { style: 'flex:1;min-width:0;display:flex;align-items:center;gap:6px' },
         h('span', { class: 'dotc', style: `background:${seatColor(s)}` }),
-        h('span', {}, p ? (p.isAI ? `بات (${diffLabel(p.aiDifficulty)})` : p.name) : `صندلی ${SEAT_LABELS[s]} — خالی`),
+        h('span', {}, p ? (p.isAI ? `${p.name} · ${diffLabel(p.aiDifficulty)}` : p.name) : `صندلی ${SEAT_LABELS[s]} — خالی`),
         teamTag ? h('span', { class: 'faint' }, teamTag) : null);
       let btn;
       if (p && p.isAI) btn = h('button', { class: 'btn btn-sm btn-ghost', onclick: () => socket.emit('room:removeBot', { seat: s }) }, '✕ حذف');
-      else if (!p) btn = h('button', { class: 'btn btn-sm', onclick: () => socket.emit('room:addBot', { seat: s, difficulty: botDifficulty }) }, '+ بات');
+      else if (!p) btn = h('button', { class: 'btn btn-sm', onclick: () => socket.emit('room:addBot', { seat: s, difficulty: botDifficulty, personality: botPersonality }) }, '+ بات');
       else btn = h('span', { class: 'badge' }, 'آماده');
       card.append(h('div', { style: 'display:flex;align-items:center;gap:8px;margin-top:8px' }, label, btn));
     }

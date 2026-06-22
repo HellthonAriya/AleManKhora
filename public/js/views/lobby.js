@@ -210,7 +210,16 @@ export function LobbyView() {
       b.addEventListener('click', () => { botDifficulty = v; [...diffSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
       diffSeg.append(b);
     });
-    const diffWrap = h('div', { class: 'opt-group', style: 'display:none' }, h('label', {}, 'سطح سختی بات‌ها'), diffSeg);
+    let botPersonality = 'balanced';
+    const personaSeg = h('div', { class: 'seg', style: 'margin-top:6px' });
+    [['balanced', 'متعادل'], ['aggressive', '⚔️ تهاجمی'], ['defensive', '🛡️ تدافعی']].forEach(([v, l]) => {
+      const b = h('button', { class: v === botPersonality ? 'active' : '' }, l);
+      b.addEventListener('click', () => { botPersonality = v; [...personaSeg.children].forEach((x) => x.classList.toggle('active', x === b)); });
+      personaSeg.append(b);
+    });
+    const diffWrap = h('div', { class: 'opt-group', style: 'display:none' },
+      h('label', {}, 'سطح سختی بات‌ها'), diffSeg,
+      h('label', { style: 'margin-top:10px;display:block' }, 'شخصیت بات‌ها'), personaSeg);
     customizer.element.addEventListener('click', () => setTimeout(refreshBots, 0));
     refreshBots();
     modal({
@@ -223,7 +232,7 @@ export function LobbyView() {
       actions: [
         { label: 'انصراف', class: 'btn-ghost' },
         { label: 'ساخت اتاق', class: 'btn-primary', onClick: () => {
-          const config = { ...customizer.getConfig(), gameType, bots, botDifficulty };
+          const config = { ...customizer.getConfig(), gameType, bots, botDifficulty, botPersonality };
           socket.emit('room:createPrivate', config, (res) => {
             if (!res?.ok) return toast(res?.error || 'خطا در ساخت اتاق', 'error');
             navigate(`/game/${res.roomId}`);

@@ -47,7 +47,7 @@ export function registerSocket(io, manager) {
         const seat = manager.seatPlayer(room, socket, socket.data.identity, 0);
         // Optionally pre-fill seats with bots chosen at creation time.
         const bots = parseInt(config?.bots, 10) || 0;
-        if (bots > 0) manager.fillBots(room, bots, config?.botDifficulty);
+        if (bots > 0) manager.fillBots(room, bots, config?.botDifficulty, config?.botPersonality);
         manager.maybeStart(room); // starts immediately if bots filled every seat
         cb?.({ ok: true, roomId: room.id, code: room.code, seat, view: room.publicView(seat) });
       } catch (e) {
@@ -61,7 +61,7 @@ export function registerSocket(io, manager) {
         const room = manager.createSeries(opts || {});
         const seat = manager.seatPlayer(room, socket, socket.data.identity, 0);
         const bots = parseInt(opts?.bots, 10) || 0;
-        if (bots > 0) manager.fillBots(room, bots, opts?.botDifficulty);
+        if (bots > 0) manager.fillBots(room, bots, opts?.botDifficulty, opts?.botPersonality);
         manager.maybeStart(room);
         cb?.({ ok: true, roomId: room.id, code: room.code, seat, view: room.publicView(seat) });
       } catch (e) {
@@ -86,13 +86,13 @@ export function registerSocket(io, manager) {
     /* ----------------------- Bots in private rooms ----------------------- */
     // Only the host (seat 0) of a non-matchmaking room may add/remove bots,
     // and only while the room is still waiting to start.
-    socket.on('room:addBot', ({ seat, difficulty } = {}, cb) => {
+    socket.on('room:addBot', ({ seat, difficulty, personality } = {}, cb) => {
       const room = manager.getRoom(socket.data.roomId);
       if (!room) return cb?.({ ok: false, error: 'بازی یافت نشد' });
       if (room.mode === 'random' || room.seatOf(socket.id) !== 0 || room.status !== 'waiting') {
         return cb?.({ ok: false, error: 'مجاز نیست' });
       }
-      if (!manager.addBot(room, seat, difficulty)) return cb?.({ ok: false, error: 'صندلی در دسترس نیست' });
+      if (!manager.addBot(room, seat, difficulty, personality)) return cb?.({ ok: false, error: 'صندلی در دسترس نیست' });
       manager.emitPerSeat(room, 'room:update', (vs) => room.publicView(vs));
       manager.maybeStart(room);
       cb?.({ ok: true });
