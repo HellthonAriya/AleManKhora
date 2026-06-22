@@ -32,7 +32,8 @@ export class BackgammonRenderer {
 
     // animation / roll state
     this._anim = null;          // { seat, from, to, t0 } checker slide
-    this._hitAnim = null;       // { seat, to } a hit checker flying to the bar
+    this._hitAnim = null;       // { seat, to, t0 } a hit checker; t0 = when it STARTS flying out
+    this._pendingBurst = null;  // { at, x, y, color, n } spark burst fired on arrival
     this._diceUntil = 0;        // tumbling-dice animation end timestamp
     this._rolledKey = null;     // turn identity for which we've already rolled
     this._curTurn = null;
@@ -47,7 +48,7 @@ export class BackgammonRenderer {
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
     // Returning to a backgrounded tab pauses rAF mid-animation; redraw fresh.
-    this._onVis = () => { if (document.visibilityState === 'visible') { this._anim = null; this._hitAnim = null; this._ensureAnim(); this.draw(); } };
+    this._onVis = () => { if (document.visibilityState === 'visible') { this._anim = null; this._hitAnim = null; this._pendingBurst = null; this._ensureAnim(); this.draw(); } };
     document.addEventListener('visibilitychange', this._onVis);
   }
   destroy() {
@@ -67,15 +68,23 @@ export class BackgammonRenderer {
 
     // Detect & animate the move that produced this state. Always drop any
     // previous in-flight animation first so a resync can't leave one frozen.
-    this._anim = null; this._hitAnim = null;
+    this._anim = null; this._hitAnim = null; this._pendingBurst = null;
     const mv = this._detectMove(prev, state);
     if (mv) {
       this._anim = { ...mv, t0: now() };
-      if (mv.hit != null) this._hitAnim = { seat: mv.hitSeat, to: mv.to, t0: now() };
-      // Flashy bursts: a hit, or bearing a checker off, throws sparks.
       const g = this._geo();
-      if (mv.hit != null) { const s = this._slot(mv.to); this._spawnBurst(s.x, s.y + (s.top ? g.ckR : -g.ckR), '#ff5b6b', 16); }
-      if (mv.to === 'off') { const os = this._offSlot(mv.seat, g); this._spawnBurst(os.x, os.y + (os.top ? g.ckR : -g.ckR), GOLD, 20); }
+      if (mv.hit != null) {
+        // Sequential hit: my checker slides onto the blot first (MOVE_MS), THEN
+        // the opponent's checker flies out to the bar. The red spark fires at the
+        // moment of contact (when my checker lands).
+        this._hitAnim = { seat: mv.hitSeat, to: mv.to, t0: now() + MOVE_MS };
+        const s = this._slot(mv.to);
+        this._pendingBurst = { at: now() + MOVE_MS, x: s.x, y: s.y + (s.top ? g.ckR : -g.ckR), color: '#ff5b6b', n: 18 };
+      } else if (mv.to === 'off') {
+        // Gold sparks when a checker is borne off (fires as it reaches the tray).
+        const os = this._offSlot(mv.seat, g);
+        this._pendingBurst = { at: now() + MOVE_MS, x: os.x, y: os.y + (os.top ? g.ckR : -g.ckR), color: GOLD, n: 20 };
+      }
     }
 
     // Roll gating: a fresh turn (no dice spent) by the opponent auto-tumbles;
@@ -139,11 +148,17 @@ export class BackgammonRenderer {
    *  (e.g. a frame was dropped while the tab was backgrounded). */
   _tickAnims() {
     const t = now();
+    // Fire the arrival spark exactly once, when the slide reaches its target.
+    if (this._pendingBurst && t >= this._pendingBurst.at) {
+      const b = this._pendingBurst; this._pendingBurst = null;
+      this._spawnBurst(b.x, b.y, b.color, b.n);
+    }
     if (this._anim && t - this._anim.t0 >= MOVE_MS) this._anim = null;
+    // _hitAnim.t0 is when it STARTS moving (after the slide); it ends MOVE_MS later.
     if (this._hitAnim && t - this._hitAnim.t0 >= MOVE_MS) this._hitAnim = null;
   }
   _animActive() {
-    if (this._anim || this._hitAnim) return true;
+    if (this._anim || this._hitAnim || this._pendingBurst) return true;
     if (this._particles.length) return true;
     if (now() < this._diceUntil) return true;
     if (this.interactive && (this.sel != null || this._needRoll())) return true; // pulse
@@ -421,13 +436,22 @@ export class BackgammonRenderer {
     ctx.restore();
   }
   _drawAnims(ctx, g) {
+    // Hit checker FIRST (so my landing checker draws on top of it). It sits on
+    // its point until my checker arrives (now < t0), then flies out to the bar.
     if (this._hitAnim) {
-      const t = easeOut(Math.min(1, (now() - this._hitAnim.t0) / MOVE_MS));
-      const a = this._checkerXY(this._slot(this._hitAnim.to), 0, g);
-      const b = this._barSlot(this._hitAnim.seat, g);
-      const by = b.top ? b.y + g.ckR : b.y - g.ckR;
-      this._checker(ctx, a.x + (b.x - a.x) * t, a.y + (by - a.y) * t, g.ckR, this._hitAnim.seat, false);
+      const slot = this._slot(this._hitAnim.to);
+      const a = this._checkerXY(slot, 0, 1, g);
+      const bs = this._barSlot(this._hitAnim.seat, g);
+      const b = { x: bs.x, y: bs.top ? bs.y + g.ckR : bs.y - g.ckR };
+      const dt = now() - this._hitAnim.t0;
+      if (dt < 0) {
+        this._checker(ctx, a.x, a.y, g.ckR, this._hitAnim.seat, false); // waiting to be hit
+      } else {
+        const t = easeOut(Math.min(1, dt / MOVE_MS));
+        this._checker(ctx, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, g.ckR, this._hitAnim.seat, false);
+      }
     }
+    // My sliding checker.
     if (this._anim) {
       const t = easeOut(Math.min(1, (now() - this._anim.t0) / MOVE_MS));
       const from = this._anim.from === 'bar' ? this._barSlot(this._anim.seat, g) : this._slot(this._anim.from);
