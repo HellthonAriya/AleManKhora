@@ -248,6 +248,15 @@ export function registerSocket(io, manager) {
       cb?.({ ok: true });
     });
 
+    // Advance a paused Pasur match to the next round after the scoring reveal.
+    socket.on('pasur:nextRound', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room || room.gameType !== 'pasur' || room.game?.phase !== 'round-end') return cb?.({ ok: false });
+      if (room.seatOf(socket.id) < 0) return cb?.({ ok: false });
+      manager.advancePasurRound(room);
+      cb?.({ ok: true });
+    });
+
     /* ------------------------------ Rematch ------------------------------ */
     socket.on('game:rematch', (cb) => {
       const room = manager.getRoom(socket.data.roomId);

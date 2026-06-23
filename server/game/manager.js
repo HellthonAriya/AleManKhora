@@ -693,6 +693,8 @@ export class GameManager {
     }));
     if (room.game.isOver()) {
       this.finishGame(room, room.game.winner);
+    } else if (room.gameType === 'pasur' && room.game.phase === 'round-end') {
+      this._pasurRoundEnd(room);
     } else {
       this.scheduleFlag(room);
       this.resetIdleTimer(room);
@@ -700,6 +702,33 @@ export class GameManager {
       if (!this.maybeEndBotGame(room)) this.maybeRunAI(room);
     }
     return result;
+  }
+
+  /** A Pasur round just ended (deck exhausted, match not yet won). Freeze play
+   *  for the scoring reveal; the client advances via `pasur:nextRound`, with a
+   *  server-side timeout as a safety net so the match can't stall. */
+  _pasurRoundEnd(room) {
+    if (room.clock?.timer) { clearTimeout(room.clock.timer); room.clock.timer = null; }
+    this.clearIdleTimer(room);
+    if (room._pasurAdvance) clearTimeout(room._pasurAdvance);
+    // The reveal animation runs on the client; auto-advance if no one acts.
+    room._pasurAdvance = setTimeout(() => this.advancePasurRound(room), 45000);
+  }
+
+  /** Deal the next Pasur round after the between-rounds scoring reveal. */
+  advancePasurRound(room) {
+    if (!room || room.status !== 'active' || room.gameType !== 'pasur') return;
+    if (room.game.phase !== 'round-end') return;
+    if (room._pasurAdvance) { clearTimeout(room._pasurAdvance); room._pasurAdvance = null; }
+    if (!room.game.nextRound()) return;
+    room.lastActivity = Date.now();
+    this.startClock(room);
+    this.resetIdleTimer(room);
+    this.emitPerSeat(room, 'game:update', (s) => ({
+      state: room.stateFor(s), turn: room.game.turn, roundStart: true,
+    }));
+    this.broadcast(room, 'game:clock', room.clockView());
+    this.maybeRunAI(room);
   }
 
   /** Dispatch to the right AI for this room's game type. Each bot may carry its

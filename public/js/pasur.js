@@ -78,29 +78,17 @@ const clone = (c) => ({ s: c.s, r: c.r });
 const sameCard = (a, b) => a.s === b.s && a.r === b.r;
 
 export class PasurGame {
-  constructor() {
+  constructor(opts = {}) {
     this.gameType = 'pasur';
     this.numPlayers = 2;
     this.teams = false;
 
-    // Deal, ensuring the opening table has no Jack (would be an instant sweep).
-    let deck, hands, table, attempts = 0;
-    do {
-      deck = shuffle(buildDeck());
-      hands = [deck.splice(0, 4), deck.splice(0, 4)];
-      table = deck.splice(0, 4);
-      attempts++;
-    } while (table.some((c) => c.r === 11) && attempts < 30);
-
-    this.deck = deck;          // 40 undealt cards
-    this.hands = hands;        // [ [4], [4] ]
-    this.table = table;        // 4 face-up
-    this.captured = [[], []];  // each player's won pile
-    this.surs = [0, 0];
-
-    this.turn = 0;
-    this.lastCapturer = null;
-    this.phase = 'play';
+    // A match is several full-deck rounds; first to `target` points wins.
+    this.target = Number(opts.target) > 0 ? Number(opts.target) : 62;
+    this.matchScores = [0, 0];   // cumulative points across rounds
+    this.roundNumber = 1;
+    this.roundResult = null;     // populated for the scoring reveal between rounds
+    this.dealer = 1;             // non-dealer leads; round 1 → player 0 leads
 
     this.scores = null;
     this.winner = null;
@@ -110,6 +98,42 @@ export class PasurGame {
     this.eliminated = [false, false];
     this.moveCount = 0;
     this.hidden = true;
+
+    this._dealRound();
+  }
+
+  /** Shuffle a fresh deck and deal one round (4+4 to hands, 4 to the table).
+   *  The opening table never starts with a Jack (would be an instant sweep). */
+  _dealRound() {
+    let deck, hands, table, attempts = 0;
+    do {
+      deck = shuffle(buildDeck());
+      hands = [deck.splice(0, 4), deck.splice(0, 4)];
+      table = deck.splice(0, 4);
+      attempts++;
+    } while (table.some((c) => c.r === 11) && attempts < 30);
+    this.deck = deck;            // 40 undealt cards
+    this.hands = hands;          // [ [4], [4] ]
+    this.table = table;          // 4 face-up
+    this.captured = [[], []];    // each player's won pile this round
+    this.surs = [0, 0];
+    this.lastCapturer = null;
+    this.phase = 'play';
+    this.turn = 1 - this.dealer; // non-dealer leads
+  }
+
+  /** Locked-in points captured so far THIS round (cards + surs, no majorities). */
+  _liveScores() {
+    return [0, 1].map((s) => {
+      let v = 0;
+      for (const c of this.captured[s]) {
+        if (c.r === 14) v += 1;                  // ace
+        if (c.r === 11) v += 1;                  // jack
+        if (c.r === 10 && c.s === 2) v += 3;     // 10♦
+        if (c.r === 2 && c.s === 3) v += 2;      // 2♣
+      }
+      return v + this.surs[s] * SUR_POINTS;
+    });
   }
 
   // ----------------------------------------------------------------- state
@@ -138,6 +162,13 @@ export class PasurGame {
       winningTeam: null,
       eliminated: this.eliminated.slice(),
       moveCount: this.moveCount,
+      // Match (multi-round to `target` points)
+      target: this.target,
+      matchScores: this.matchScores.slice(),
+      roundNumber: this.roundNumber,
+      dealer: this.dealer,
+      liveScores: this._liveScores(),
+      roundResult: this.roundResult,   // null during play; reveal data between rounds
     };
   }
 
@@ -174,6 +205,11 @@ export class PasurGame {
     g.winningTeam = null;
     g.eliminated = (state.eliminated || [false, false]).slice();
     g.moveCount = state.moveCount;
+    g.target = state.target ?? 62;
+    g.matchScores = (state.matchScores || [0, 0]).slice();
+    g.roundNumber = state.roundNumber || 1;
+    g.dealer = state.dealer ?? 1;
+    g.roundResult = state.roundResult || null;
     g.hidden = true;
     return g;
   }
@@ -192,7 +228,7 @@ export class PasurGame {
   }
 
   legalMoves(seat = this.turn) {
-    if (this.isOver() || seat !== this.turn) return [];
+    if (this.isOver() || this.phase !== 'play' || seat !== this.turn) return [];
     const hand = this.hands[seat];
     if (!hand) return [];
     const out = [];
@@ -274,47 +310,92 @@ export class PasurGame {
     this.moveCount++;
     this.turn = 1 - seat;
 
-    // Re-deal a fresh round, or finish if the deck is exhausted.
+    // Deal within the round, end the round, or end the match.
     if (this.hands[0].length === 0 && this.hands[1].length === 0) {
       if (this.deck.length >= 8) {
         this.hands[0] = this.deck.splice(0, 4);
         this.hands[1] = this.deck.splice(0, 4);
       } else {
-        this._endGame();
+        this._endRound();
       }
     }
 
     return { state: this.toState(), winner: this.winner };
   }
 
-  _endGame() {
+  /** Score the current round's captured piles. Returns a per-player breakdown
+   *  (used both for the total and for the animated reveal on the client). */
+  _scoreRound() {
+    const bd = [0, 1].map((s) => {
+      const pile = this.captured[s];
+      let aces = 0, jacks = 0, tenD = 0, twoC = 0;
+      for (const c of pile) {
+        if (c.r === 14) aces++;
+        if (c.r === 11) jacks++;
+        if (c.r === 10 && c.s === 2) tenD = 1;
+        if (c.r === 2 && c.s === 3) twoC = 1;
+      }
+      const clubs = pile.filter((c) => c.s === 3).length;
+      return { aces, jacks, tenD, twoC, surs: this.surs[s], cards: pile.length, clubs,
+               mostCards: false, mostClubs: false, total: 0 };
+    });
+    // Majorities (all 52 cards captured by round end, so "most" = strict lead).
+    if (bd[0].cards > bd[1].cards) bd[0].mostCards = true;
+    else if (bd[1].cards > bd[0].cards) bd[1].mostCards = true;
+    if (bd[0].clubs > bd[1].clubs) bd[0].mostClubs = true;
+    else if (bd[1].clubs > bd[0].clubs) bd[1].mostClubs = true;
+    for (const b of bd) {
+      b.total = b.aces + b.jacks + b.tenD * 3 + b.twoC * 2 + b.surs * SUR_POINTS
+              + (b.mostCards ? MOST_CARDS_POINTS : 0) + (b.mostClubs ? MOST_CLUBS_POINTS : 0);
+    }
+    return bd;
+  }
+
+  /** End the current round: sweep the table, tally, and either pause for the
+   *  scoring reveal or finish the match if someone reached the target. */
+  _endRound() {
     // Whoever captured last sweeps the remaining table (no سور bonus).
     if (this.table.length && this.lastCapturer != null) {
       this.captured[this.lastCapturer].push(...this.table.map(clone));
       this.table = [];
     }
-    const sc = [0, 0];
-    for (let s = 0; s < 2; s++) {
-      for (const c of this.captured[s]) {
-        if (c.r === 14) sc[s] += 1;                 // Ace
-        else if (c.r === 11) sc[s] += 1;            // Jack
-        if (c.r === 10 && c.s === 2) sc[s] += 3;    // 10 of Diamonds
-        if (c.r === 2 && c.s === 3) sc[s] += 2;     // 2 of Clubs
-      }
-      sc[s] += this.surs[s] * SUR_POINTS;
+    const bd = this._scoreRound();
+    const roundScores = [bd[0].total, bd[1].total];
+    const matchBefore = this.matchScores.slice();
+    this.matchScores = [matchBefore[0] + roundScores[0], matchBefore[1] + roundScores[1]];
+    this.roundResult = {
+      roundNumber: this.roundNumber,
+      breakdown: bd,
+      roundScores,
+      captured: [this.captured[0].map(clone), this.captured[1].map(clone)],
+      matchBefore,
+      matchAfter: this.matchScores.slice(),
+      target: this.target,
+    };
+    if (Math.max(this.matchScores[0], this.matchScores[1]) >= this.target) {
+      this._finishMatch();
+    } else {
+      this.phase = 'round-end';   // pause for the client scoring reveal
     }
-    const n0 = this.captured[0].length, n1 = this.captured[1].length;
-    if (n0 > n1) sc[0] += MOST_CARDS_POINTS; else if (n1 > n0) sc[1] += MOST_CARDS_POINTS;
-    const clubs = (s) => this.captured[s].filter((c) => c.s === 3).length;
-    const c0 = clubs(0), c1 = clubs(1);
-    if (c0 > c1) sc[0] += MOST_CLUBS_POINTS; else if (c1 > c0) sc[1] += MOST_CLUBS_POINTS;
+  }
 
-    this.scores = sc;
+  _finishMatch() {
+    this.scores = this.matchScores.slice();
     this.phase = 'ended';
     this.endReason = 'points';
-    if (sc[0] > sc[1]) this.winner = 0;
-    else if (sc[1] > sc[0]) this.winner = 1;
+    if (this.scores[0] > this.scores[1]) this.winner = 0;
+    else if (this.scores[1] > this.scores[0]) this.winner = 1;
     else { this.draw = true; this.winner = null; }
+  }
+
+  /** Advance to the next round after the reveal (host/timer triggered). */
+  nextRound() {
+    if (this.phase !== 'round-end' || this.isOver()) return false;
+    this.roundNumber++;
+    this.dealer = 1 - this.dealer;
+    this.roundResult = null;
+    this._dealRound();
+    return true;
   }
 
   eliminate(seat) {
