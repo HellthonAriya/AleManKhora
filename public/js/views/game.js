@@ -42,6 +42,8 @@ export function GameView(roomId) {
   let aiSeats = [];
   let status = 'waiting';
   let code = null;
+  let mode = null;            // private | ai | random | series | tournament
+  let awaitingHost = false;   // host-managed room waiting for the host to start
   let gameType = 'quoridor';
   let isChess = false;
   let rematchPending = false; // true after we vote for a rematch, until it starts
@@ -503,12 +505,11 @@ export function GameView(roomId) {
     return card;
   }
 
-  /** Host-only panel for filling empty seats with bots while the room waits. */
+  /** Host-only lineup editor: set every seat to a human (open) or a bot,
+   *  then press Start. Shown for host-managed rooms (private / vs-AI / league). */
   function seatManagerCard() {
-    if (seat !== 0 || !code || status !== 'waiting') return null;
-    let manageable = false;
-    for (let s = 1; s < numPlayers; s++) { const p = players[s]; if (!p || p.isAI) { manageable = true; break; } }
-    if (!manageable) return null;
+    if (seat !== 0 || status !== 'waiting' || spectator) return null;
+    if (!['private', 'ai', 'series'].includes(mode)) return null;
 
     let botDifficulty = 'normal';
     let botPersonality = 'balanced';
@@ -525,23 +526,37 @@ export function GameView(roomId) {
       personaSeg.append(b);
     });
 
-    const card = h('div', { class: 'card', style: 'margin-top:14px' },
-      h('div', { class: 'card-title' }, '🤖 صندلی‌ها و بات‌ها'),
+    const card = h('div', { class: 'card' },
+      h('div', { class: 'card-title' }, '👥 ترکیب بازیکنان'),
+      h('p', { class: 'card-sub' }, 'هر صندلی را بازیکن (با کد دعوت) یا بات کن، بعد بازی را شروع کن.'),
       h('div', { class: 'opt-group' }, h('label', {}, 'سطح سختی بات جدید'), diffSeg),
       h('div', { class: 'opt-group' }, h('label', {}, 'شخصیت بات جدید'), personaSeg));
 
-    for (let s = 1; s < numPlayers; s++) {
+    let allFilled = true;
+    for (let s = 0; s < numPlayers; s++) {
       const p = players[s];
+      if (!p) allFilled = false;
       const teamTag = config?.teams ? ` · ${TEAM_NAMES[s % 2]}` : '';
+      const who = s === 0 ? 'تو (میزبان)'
+        : p ? (p.isAI ? `بات · ${diffLabel(p.aiDifficulty)}` : p.name)
+        : `صندلی ${SEAT_LABELS[s]} — خالی`;
       const label = h('div', { style: 'flex:1;min-width:0;display:flex;align-items:center;gap:6px' },
-        h('span', { class: 'dotc', style: `background:${seatColor(s)}` }),
-        h('span', {}, p ? (p.isAI ? `${p.name} · ${diffLabel(p.aiDifficulty)}` : p.name) : `صندلی ${SEAT_LABELS[s]} — خالی`),
+        h('span', { class: 'pc-avatar sm', style: `background:${seatColor(s)}` }, p ? (p.isAI ? '🤖' : initials(p.name)) : SEAT_LABELS[s]),
+        h('span', {}, who),
         teamTag ? h('span', { class: 'faint' }, teamTag) : null);
-      let btn;
-      if (p && p.isAI) btn = h('button', { class: 'btn btn-sm btn-ghost', onclick: () => socket.emit('room:removeBot', { seat: s }) }, '✕ حذف');
-      else if (!p) btn = h('button', { class: 'btn btn-sm', onclick: () => socket.emit('room:addBot', { seat: s, difficulty: botDifficulty, personality: botPersonality }) }, '+ بات');
-      else btn = h('span', { class: 'badge' }, 'آماده');
-      card.append(h('div', { style: 'display:flex;align-items:center;gap:8px;margin-top:8px' }, label, btn));
+      let action;
+      if (s === 0) action = h('span', { class: 'badge badge-ok' }, 'تو');
+      else if (p && p.isAI) action = h('button', { class: 'btn btn-sm btn-ghost', onclick: () => socket.emit('room:removeBot', { seat: s }) }, '↺ خالی کن');
+      else if (p) action = h('span', { class: 'badge' }, 'بازیکن');
+      else action = h('button', { class: 'btn btn-sm btn-primary', onclick: () => socket.emit('room:addBot', { seat: s, difficulty: botDifficulty, personality: botPersonality }) }, '🤖 بات کن');
+      card.append(h('div', { class: 'lineup-row' }, label, action));
+    }
+
+    if (awaitingHost) {
+      const startBtn = h('button', { class: 'btn btn-primary btn-block', style: 'margin-top:14px',
+        disabled: !allFilled, onclick: () => socket.emit('room:start', (res) => { if (!res?.ok) toast(res?.error || 'خطا', 'error'); }) },
+        allFilled ? '▶ شروع بازی' : '⏳ منتظر پر شدن صندلی‌ها');
+      card.append(startBtn);
     }
     return card;
   }
@@ -574,20 +589,31 @@ export function GameView(roomId) {
       const pc = predictionCard();
       if (pc) controlsMount.append(pc);
     } else if (status === 'waiting') {
-      const inviteBox = code ? h('div', { class: 'card' },
-        h('div', { class: 'card-title' }, '🔗 دعوت دوست'),
-        h('p', { class: 'card-sub' }, numPlayers === 4 ? 'این کد را برای ۳ نفر دیگر بفرست:' : 'این کد یا لینک را برای حریفت بفرست:'),
-        h('div', { class: 'invite-box' },
-          h('span', { class: 'invite-code' }, code),
-          h('button', { class: 'btn btn-sm', onclick: copyCode }, 'کپی کد')),
-        h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:10px', onclick: copyLink }, '📋 کپی لینک دعوت'),
-        h('p', { class: 'faint', style: 'margin-top:10px' }, `${faNum(players.filter(Boolean).length)} از ${faNum(numPlayers)} بازیکن آماده`),
-      ) : h('div', { class: 'card' }, h('p', { class: 'muted' }, 'در انتظار حریف…'));
-      controlsMount.append(inviteBox);
+      // Host-managed lineup editor (per-seat human/bot) goes first.
+      const lineup = seatManagerCard();
+      if (lineup) controlsMount.append(lineup);
+      // Non-host players just wait for the host to start.
+      if (seat > 0) {
+        controlsMount.append(h('div', { class: 'card' },
+          h('div', { class: 'card-title' }, '⏳ آمادهٔ شروع'),
+          h('p', { class: 'card-sub', style: 'margin:0' }, 'منتظر شروع بازی توسط میزبان هستیم…')));
+      }
+      // Invite code for open human seats (any room that has one).
+      const openSeats = players.filter((p) => !p).length;
+      if (code && openSeats > 0) {
+        controlsMount.append(h('div', { class: 'card', style: lineup ? 'margin-top:14px' : '' },
+          h('div', { class: 'card-title' }, '🔗 دعوت با کد'),
+          h('p', { class: 'card-sub' }, `${faNum(openSeats)} صندلی خالی — این کد را بفرست:`),
+          h('div', { class: 'invite-box' },
+            h('span', { class: 'invite-code' }, code),
+            h('button', { class: 'btn btn-sm', onclick: copyCode }, 'کپی کد')),
+          h('button', { class: 'btn btn-sm btn-block', style: 'margin-top:10px', onclick: copyLink }, '📋 کپی لینک دعوت')));
+      }
+      if (!lineup && seat === 0 && !code) {
+        controlsMount.append(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'در انتظار حریف…')));
+      }
       const fc = inviteFriendsCard();
       if (fc) controlsMount.append(fc);
-      const sm = seatManagerCard();
-      if (sm) controlsMount.append(sm);
     } else if (status === 'active') {
       const card = h('div', { class: 'card' },
         h('div', { class: 'card-title' }, 'کنترل نوبت'),
@@ -783,6 +809,8 @@ export function GameView(roomId) {
     config = v.config; state = v.state; players = v.players;
     numPlayers = v.numPlayers || v.players?.length || 2;
     aiSeats = v.aiSeats || []; status = v.status; code = v.code;
+    if (v.mode !== undefined) mode = v.mode;
+    awaitingHost = !!v.awaitingHost;
     if (v.series !== undefined) series = v.series;
     if (v.tournament !== undefined) tournament = v.tournament;
     gameType = v.gameType || config?.gameType || 'quoridor';

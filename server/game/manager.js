@@ -224,6 +224,9 @@ class Room {
     this.predictions = new Map(); // spectator socketId -> { seat, userId }
     this.series = null; // set for multi-game "league" rooms
     this.tournament = null; // set for knockout rooms
+    // Host-managed rooms (private/ai) wait for the host to lock the lineup and
+    // press Start instead of auto-starting the moment every seat is filled.
+    this.awaitingHost = false;
     // chess clock
     const ms = (config.timeLimit || 0) * 1000;
     this.clock = {
@@ -265,6 +268,7 @@ class Room {
         p ? { name: p.name, color: p.color, userId: p.userId, connected: p.connected, elo: p.elo, isAI: !!p.isAI, personality: p.personality || null } : null
       ),
       aiSeats: [...this.aiSeats],
+      awaitingHost: this.awaitingHost,
       spectators: this.spectators.size,
       clock: this.clockView(),
       state: this.stateFor(viewerSeat),
@@ -330,17 +334,26 @@ export class GameManager {
   }
 
   createPrivate(config) {
-    return this.createRoom({ mode: 'private', config, code: codeGen() });
+    const room = this.createRoom({ mode: 'private', config, code: codeGen() });
+    room.awaitingHost = true; // host arranges the lineup, then presses Start
+    return room;
   }
 
   createAI(config, difficulty) {
     const room = this.createRoom({ mode: 'ai', config });
     room.aiDifficulty = difficulty || getSettings().ai_difficulty || 'normal';
-    // All seats except 0 are AI.
+    room.awaitingHost = true; // land in the lineup so the host can tweak seats
+    // Pre-fill all seats except 0 with bots; the host can change any of them.
     for (let s = 1; s < room.numPlayers; s++) {
       this.addBot(room, s, room.aiDifficulty);
     }
     return room;
+  }
+
+  /** Host locks the lineup and launches the game (host-managed rooms). */
+  hostStart(room) {
+    room.awaitingHost = false;
+    return this.maybeStart(room);
   }
 
   /** Build a bot player object for a given seat. */
@@ -417,6 +430,7 @@ export class GameManager {
     if (games.length < 2) throw new Error('برای یک سری حداقل دو بازی انتخاب کن');
     const configs = games.map((g) => this._seriesConfig(g, n, { timeLimit }));
     const room = this.createRoom({ mode: 'series', config: configs[0], code: codeGen() });
+    room.awaitingHost = true; // host sets the lineup before the league starts
     room.series = {
       configs, index: 0,
       scores: new Array(room.numPlayers).fill(0),
@@ -579,6 +593,8 @@ export class GameManager {
   }
 
   maybeStart(room) {
+    // Host-managed rooms don't auto-start; they wait for an explicit Start.
+    if (room.awaitingHost) return false;
     if (room.isFull() && room.status === 'waiting') {
       room.status = 'active';
       this._persistStart(room);

@@ -258,6 +258,9 @@ input, select, textarea { font-family: inherit; }
 .player-card { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--border); transition: .2s; }
 .player-card.turn { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 10px 30px -12px var(--accent-glow); }
 .player-card .pc-avatar { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; color: #04130d; flex-shrink: 0; }
+.pc-avatar.sm { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-weight: 800; color: #04130d; flex-shrink: 0; font-size: .82rem; }
+.lineup-row { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
+.lineup-row:first-of-type { border-top: none; }
 .player-card .pc-name { font-weight: 800; }
 .player-card .pc-walls { color: var(--text-dim); font-size: .85rem; }
 .walls-dots { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 5px; max-width: 150px; }

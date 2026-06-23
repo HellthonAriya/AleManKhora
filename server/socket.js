@@ -146,6 +146,16 @@ export function registerSocket(io, manager) {
       cb?.({ ok: true });
     });
 
+    // Host locks the lineup and starts the game.
+    socket.on('room:start', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room) return cb?.({ ok: false, error: 'بازی یافت نشد' });
+      if (room.seatOf(socket.id) !== 0 || room.status !== 'waiting') return cb?.({ ok: false, error: 'مجاز نیست' });
+      if (!room.isFull()) return cb?.({ ok: false, error: 'هنوز همهٔ صندلی‌ها پر نشده‌اند' });
+      manager.hostStart(room);
+      cb?.({ ok: true });
+    });
+
     socket.on('room:createAI', ({ config, difficulty } = {}, cb) => {
       try {
         const room = manager.createAI(config || {}, difficulty);
