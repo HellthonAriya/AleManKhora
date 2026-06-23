@@ -46,7 +46,9 @@ export function HokmCustomizer() {
     const g = new HokmGame({ variant: cfg.variant });
     renderer.setConfig({ colors: [...cfg.colors] });
     renderer.setMySeat(0);
-    renderer.setState(g.toStateFor(0));
+    const st = g.toStateFor(0);
+    st.hands[0] = null; // hide player's hand in lobby preview
+    renderer.setState(st);
   }
 
   const players = () => Number(cfg.variant);

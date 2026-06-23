@@ -530,6 +530,8 @@ export class HokmRenderer {
   _drawMyHand(ctx, S, st, CW, CH) {
     const cards = st.hands?.[this.mySeat];
     if (!cards || !cards.length) return;
+    // Non-hakem players cannot see their cards during trump selection
+    const hideCards = st.phase === 'choose-trump' && this.mySeat !== st.hakem;
     const sorted  = [...cards].sort((a, b) => (SUIT_SORT[a.s] - SUIT_SORT[b.s]) || (b.r - a.r));
     const legal   = this._legalCards();
     const maxSpan = S * 0.88;
@@ -539,13 +541,18 @@ export class HokmRenderer {
     const H       = this.cssH || S;
     const baseY   = H * HAND_BASE_Y;
     sorted.forEach((card, i) => {
-      const isLegal = !legal || legal.has(`${card.s},${card.r}`);
-      const lift    = (this.hover === i && isLegal) ? S * 0.028 : 0;
-      const x = startX + i * spacing, y = baseY - lift;
-      this.hand.push({ card, x, y, w: CW, h: CH, legal: !!(legal && isLegal) });
-      this._cardFace(ctx, x, y, CW, CH, card);
-      if (legal && !isLegal) { this._rr(x, y, CW, CH, CW * 0.12); ctx.fillStyle = 'rgba(10,20,14,.52)'; ctx.fill(); }
-      else if (legal && isLegal) { this._rr(x, y, CW, CH, CW * 0.12); ctx.strokeStyle = 'rgba(80,230,140,.95)'; ctx.lineWidth = 2.5; ctx.stroke(); }
+      const x = startX + i * spacing;
+      if (hideCards) {
+        this._cardBack(ctx, x, baseY, CW, CH, this._seatColor(this.mySeat));
+      } else {
+        const isLegal = !legal || legal.has(`${card.s},${card.r}`);
+        const lift    = (this.hover === i && isLegal) ? S * 0.028 : 0;
+        const y = baseY - lift;
+        this.hand.push({ card, x, y, w: CW, h: CH, legal: !!(legal && isLegal) });
+        this._cardFace(ctx, x, y, CW, CH, card);
+        if (legal && !isLegal) { this._rr(x, y, CW, CH, CW * 0.12); ctx.fillStyle = 'rgba(10,20,14,.52)'; ctx.fill(); }
+        else if (legal && isLegal) { this._rr(x, y, CW, CH, CW * 0.12); ctx.strokeStyle = 'rgba(80,230,140,.95)'; ctx.lineWidth = 2.5; ctx.stroke(); }
+      }
     });
     // Status strip below my cards
     const ySub = baseY + CH + S * 0.016;
