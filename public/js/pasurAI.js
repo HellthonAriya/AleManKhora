@@ -25,9 +25,8 @@ function moveValue(game, move) {
     }
     v += pile.length * 0.30;                  // most-cards pressure
     v += pile.filter((c) => c.s === 3).length * 0.45; // most-clubs pressure
-    // سور — emptying the table scores a bonus, but NOT with a سرباز (Jack)
-    // and NOT in the final round (deck exhausted).
-    if (card.r !== 11 && game.table.length - captured.length === 0 && (game.deck?.length ?? 0) > 0) v += 6;
+    // سور — emptying the table scores a bonus, but NOT with a سرباز (Jack).
+    if (card.r !== 11 && game.table.length - captured.length === 0) v += 6;
     return v;
   }
 

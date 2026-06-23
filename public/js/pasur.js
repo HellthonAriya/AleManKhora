@@ -267,10 +267,8 @@ export class PasurGame {
       this.table = this.table.filter((c) => !capSet.has(c.s * 100 + c.r));
       this.captured[seat].push(clone(card), ...captured);
       this.lastCapturer = seat;
-      // سور: clearing the table scores a bonus — but NOT with a سرباز (Jack),
-      // and NOT during the final round (deck exhausted, no more deals).
-      const finalRound = this.deck.length === 0;
-      if (this.table.length === 0 && card.r !== 11 && !finalRound) this.surs[seat]++;
+      // سور: clearing the table scores a bonus — but NOT with a سرباز (Jack).
+      if (this.table.length === 0 && card.r !== 11) this.surs[seat]++;
     }
 
     this.moveCount++;

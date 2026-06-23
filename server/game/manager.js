@@ -342,11 +342,13 @@ export class GameManager {
   createAI(config, difficulty) {
     const room = this.createRoom({ mode: 'ai', config });
     room.aiDifficulty = difficulty || getSettings().ai_difficulty || 'normal';
-    room.awaitingHost = true; // land in the lineup so the host can tweak seats
-    // Pre-fill all seats except 0 with bots; the host can change any of them.
+    // Pre-fill all seats except 0 with bots.
     for (let s = 1; s < room.numPlayers; s++) {
       this.addBot(room, s, room.aiDifficulty);
     }
+    // Multi-seat games land in the lineup editor so the host can pick which
+    // seats are bots; a plain 1v1 vs-AI game just starts immediately as before.
+    if (room.numPlayers > 2) room.awaitingHost = true;
     return room;
   }
 
