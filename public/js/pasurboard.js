@@ -435,19 +435,34 @@ export class PasurRenderer {
     const x0 = S * 0.05, x1 = S * 0.95, gap = S * 0.018;
     const cw = (x1 - x0 - 2 * gap) / 3;
     const mine = st.turn === this.mySeat && !st.winner && !st.draw;
+    const me = this.mySeat >= 0 ? this.mySeat : 0, opp = 1 - me;
+    const lastRound = (st.deckCount ?? 0) === 0 && st.phase === 'play';
+    const target = st.target ?? 62;
+    const ms = st.matchScores || [0, 0];
 
-    // chip 1 — magic 11
-    this._chip(ctx, x0, y, cw, h, 'rgba(0,0,0,.42)', 'rgba(255,255,255,.12)');
-    this._chipText(ctx, x0, cw, y, h, GOLD, 'جادو', fa(st.magic ?? 11));
-    // chip 2 — deck remaining
-    this._chip(ctx, x0 + cw + gap, y, cw, h, 'rgba(0,0,0,.42)', 'rgba(255,255,255,.12)');
-    this._chipText(ctx, x0 + cw + gap, cw, y, h, 'rgba(255,255,255,.9)', 'کارت', `🂠 ${fa(st.deckCount ?? 0)}`);
+    // chip 1 — round number + deck remaining (turns orange on the last round)
+    this._chip(ctx, x0, y, cw, h,
+      lastRound ? 'rgba(232,146,60,.22)' : 'rgba(0,0,0,.42)',
+      lastRound ? '#e8923c' : 'rgba(255,255,255,.12)');
+    this._chipText(ctx, x0, cw, y, h,
+      lastRound ? '#ffb877' : 'rgba(255,255,255,.9)',
+      `دست ${fa(st.roundNumber ?? 1)}`, lastRound ? '⚑ آخر' : `🂠 ${fa(st.deckCount ?? 0)}`);
+    // chip 2 — running match score (تو : حریف) toward the target
+    this._chip(ctx, x0 + cw + gap, y, cw, h, 'rgba(255,215,107,.12)', 'rgba(255,215,107,.4)');
+    this._chipText(ctx, x0 + cw + gap, cw, y, h, GOLD, `هدف ${fa(target)}`, `${fa(ms[me])} : ${fa(ms[opp])}`);
     // chip 3 — turn
     const tx = x0 + 2 * (cw + gap);
     this._chip(ctx, tx, y, cw, h, mine ? 'rgba(91,224,140,.18)' : 'rgba(0,0,0,.42)', mine ? GREEN : 'rgba(255,255,255,.12)');
     ctx.fillStyle = mine ? GREEN : 'rgba(255,255,255,.8)';
     ctx.font = `bold ${h * 0.4}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(mine ? '✦ نوبت توست' : 'نوبت حریف', tx + cw / 2, y + h / 2);
+
+    // Last-round banner under the info bar.
+    if (lastRound) {
+      ctx.fillStyle = '#ffb877'; ctx.font = `bold ${S * 0.024}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('⚑ دست آخر — کارتی برای پخش نمانده', S / 2, y + h + S * 0.006);
+    }
   }
   _chip(ctx, x, y, w, h, fill, stroke) {
     this._rr(x, y, w, h, h * 0.32); ctx.fillStyle = fill; ctx.fill();
@@ -587,8 +602,9 @@ export class PasurRenderer {
     const sy = S * STRIP_Y;
     ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `${S * 0.028}px sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const livePts = st.liveScores?.[this.mySeat] ?? 0;
     ctx.fillText(
-      `تو · 🃏 ${fa(st.capturedCounts?.[this.mySeat] ?? 0)} برگ · ♣ ${fa(st.clubCounts?.[this.mySeat] ?? 0)} · سور ${fa(st.surs?.[this.mySeat] ?? 0)}`,
+      `تو · 🃏 ${fa(st.capturedCounts?.[this.mySeat] ?? 0)} برگ · ♣ ${fa(st.clubCounts?.[this.mySeat] ?? 0)} · سور ${fa(st.surs?.[this.mySeat] ?? 0)} · ★ ${fa(livePts)} امتیازِ این دست`,
       S / 2, sy);
 
     if (!this.staged || !this.interactive) return;

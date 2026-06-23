@@ -9,6 +9,7 @@ import { DotsRenderer } from '../dotsboard.js';
 import { BackgammonRenderer } from '../backgammonboard.js';
 import { HokmRenderer } from '../hokmboard.js';
 import { PasurRenderer } from '../pasurboard.js';
+import { showPasurReveal } from '../pasurReveal.js';
 import { openRules } from '../rules.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
@@ -54,6 +55,9 @@ export function GameView(roomId) {
   let overModalHandle = null; // handle to the open game-over popup, if any
   let drawWaitModal = null;   // our "waiting for opponent" draw popup (offerer side)
   let drawRecvModal = null;   // the incoming draw-offer popup (receiver side)
+  let pasurShownRound = 0;    // last Pasur round whose scoring reveal we played
+  let pasurRevealHandle = null; // open Pasur reveal overlay, if any
+  let pendingOver = null;     // game-over payload deferred until a reveal finishes
 
   // local clock model
   let clock = { enabled: false, remaining: [], turn: 0, running: false, incMs: 0, limitMs: 0 };
@@ -822,6 +826,8 @@ export function GameView(roomId) {
   const handlers = {
     'game:start': (v) => {
       rematchPending = false; seriesPending = false; myPrediction = null;
+      pasurShownRound = 0; pendingOver = null;
+      if (pasurRevealHandle) { pasurRevealHandle.close?.(); pasurRevealHandle = null; }
       if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
       applyView(v);
       playSound('start');
@@ -842,6 +848,7 @@ export function GameView(roomId) {
     'room:update': (v) => applyView(v),
     'game:update': ({ state: s }) => {
       state = s; syncRenderer();
+      if (maybePasurReveal(s, false)) return;
       if (status === 'active' && !gameIsOver()) playSound(isMyTurnActive() ? 'turn' : 'move');
     },
     'game:clock': (cv) => { setClock(cv); },
@@ -889,12 +896,45 @@ export function GameView(roomId) {
         const iWon = data.winner === seat || (config?.teams && data.winner != null && data.winner % 2 === seat % 2);
         playSound(data.draw ? 'notify' : iWon ? 'win' : 'lose');
       }
-      if (data.tournament) showTournamentStandings(data);
-      else if (data.series) showSeriesStandings(data);
-      else showGameOver(data);
+      // Pasur: play the final round's scoring reveal first, then the result.
+      if (gameType === 'pasur' && data.state?.roundResult
+          && data.state.roundResult.roundNumber > pasurShownRound) {
+        pendingOver = data;
+        maybePasurReveal(data.state, true);
+        return;
+      }
+      showOverFlow(data);
     },
   };
   for (const [ev, fn] of Object.entries(handlers)) socket.on(ev, fn);
+
+  /** Route a game-over payload to the right popup (tournament / series / plain). */
+  function showOverFlow(data) {
+    if (data.tournament) showTournamentStandings(data);
+    else if (data.series) showSeriesStandings(data);
+    else showGameOver(data);
+  }
+
+  /** If this Pasur state carries a fresh round result, play the animated
+   *  end-of-round scoring reveal. Returns true if a reveal was started. */
+  function maybePasurReveal(s, final) {
+    if (gameType !== 'pasur' || !s?.roundResult) return false;
+    if (s.roundResult.roundNumber <= pasurShownRound) return false;
+    pasurShownRound = s.roundResult.roundNumber;
+    if (pasurRevealHandle) { pasurRevealHandle.close?.(); pasurRevealHandle = null; }
+    pasurRevealHandle = showPasurReveal(s.roundResult, {
+      mySeat: seat < 0 ? 0 : seat,
+      names: [players[0]?.name || 'بازیکن ۱', players[1]?.name || 'بازیکن ۲'],
+      colors: [seatColor(0), seatColor(1)],
+      finalResult: !!final,
+      onDone: () => {
+        pasurRevealHandle = null;
+        if (final) { const d = pendingOver; pendingOver = null; if (d) showOverFlow(d); }
+        else if (!spectator) socket.emit('pasur:nextRound');
+      },
+    });
+    return true;
+  }
 
   function showGameOver(data) {
     if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
@@ -1132,6 +1172,7 @@ export function GameView(roomId) {
     document.removeEventListener('pointermove', onDragMove);
     document.removeEventListener('pointermove', onTrayMove);
     renderer?.destroy?.();
+    if (pasurRevealHandle) { pasurRevealHandle.dismiss?.(); pasurRevealHandle = null; }
     voice.destroy();
     socket.emit('room:leave');
   });
