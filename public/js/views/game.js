@@ -462,10 +462,11 @@ export function GameView(roomId) {
       }
 
       playerCardsMount.append(h('div', { class: 'player-card' + (isTurn ? ' turn' : '') + (isEliminated ? ' eliminated' : '') },
-        h('div', { class: 'pc-avatar', style: `background:${seatColor(s)}` }, p ? initials(p.name) : SEAT_LABELS[s]),
+        h('div', { class: 'pc-avatar', style: `background:${seatColor(s)}` }, p ? (p.isAI ? '🤖' : initials(p.name)) : SEAT_LABELS[s]),
         h('div', { style: 'flex:1;min-width:0' },
           h('div', { class: 'pc-name' }, p ? p.name : `بازیکن ${SEAT_LABELS[s]}`,
             s === seat ? h('span', { class: 'faint' }, ' (تو)') : null,
+            p && p.isAI ? h('span', { class: 'badge badge-bot', style: 'margin-inline-start:6px' }, '🤖 بات') : null,
             p && p.connected === false && !p.isAI ? h('span', { class: 'badge badge-ban', style: 'margin-inline-start:6px' }, 'قطع') : null),
           detail,
         ),

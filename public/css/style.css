@@ -354,6 +354,7 @@ table.tbl tr:hover td { background: rgba(255,255,255,.02); }
 .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .76rem; font-weight: 700; }
 .badge-admin { background: rgba(255,211,107,.18); color: var(--gold); }
 .badge-ban { background: rgba(255,93,108,.18); color: var(--danger); }
+.badge-bot { background: rgba(54,198,255,.18); color: #36c6ff; }
 .badge-ok { background: rgba(19,192,138,.18); color: var(--accent); }
 .badge-check { background: rgba(255,93,108,.22); color: var(--danger); }
 .check-badge { color: var(--danger); font-weight: 800; margin-inline-start: 6px; animation: checkpulse 1s ease-in-out infinite; }
