@@ -33,6 +33,9 @@ const key = (c) => `${c.s},${c.r}`;
 
 const GOLD = '#ffd76b', GREEN = '#5be08c';
 const FLASH_MS = 650, FLY_MS = 440, DEAL_MS = 380, DEAL_STAGGER = 65, SUR_MS = 1600;
+// How long captured cards linger (outlined in the capturer's colour) before
+// flying to the pile — so you can SEE what the opponent just took.
+const CAP_HOLD_MS = 950;
 
 // Layout bands (fractions of the square canvas S).
 const INFO_Y = 0.022, INFO_H = 0.058;
@@ -68,6 +71,7 @@ export class PasurRenderer {
     this._surFx = { until: 0, seat: -1 };
     this._flashUntil = 0;
     this._flashKeys = new Set();
+    this._captureHold = null;  // { until, seat, color, cards:[{card,x,y,w,h}] }
     this._dealKeys = new Set();    // keys of cards mid-deal (skip in static layer)
     this._oppFlyCount = 0;         // face-down deal cards heading to opponent
     this._raf = null;
@@ -126,19 +130,26 @@ export class PasurRenderer {
     const S = this.css;
     const prevLayout = this._tableLayout(prev.table || [], S);
     const target = this._pilePos(seat, S);
+    const color = this._seatColor(seat);
+    const t0base = now() + CAP_HOLD_MS;   // fly only AFTER the cards have lingered
+    const held = [];
     gone.forEach((c, idx) => {
       const slot = prevLayout.find((p) => key(p.card) === key(c));
-      const fx = slot ? slot.x + slot.w / 2 : S * 0.5;
-      const fy = slot ? slot.y + slot.h / 2 : S * TABLE_CY;
+      const w = slot ? slot.w : S * 0.108, hgt = slot ? slot.h : S * 0.151;
+      const x = slot ? slot.x : S * 0.5 - w / 2, y = slot ? slot.y : S * TABLE_CY - hgt / 2;
+      held.push({ card: c, x, y, w, h: hgt });
       this._flyCards.push({
-        card: c, fx, fy, tx: target.x, ty: target.y, t0: now() + idx * 40, dur: FLY_MS,
-        w: S * 0.10, h: S * 0.14, faceDown: false, accent: this._seatColor(seat),
+        card: c, fx: x + w / 2, fy: y + hgt / 2, tx: target.x, ty: target.y,
+        t0: t0base + idx * 40, dur: FLY_MS,
+        w: S * 0.10, h: S * 0.14, faceDown: false, accent: color,
         kind: 'capture', pileSeat: seat, arcH: S * 0.05,
       });
     });
-    // also flash briefly for emphasis
+    // Hold the captured cards in place, outlined in the capturer's colour, so
+    // the move is readable (especially the opponent's) before they fly off.
+    this._captureHold = { until: t0base, seat, color, cards: held };
     this._flashKeys = new Set(gone.map(key));
-    this._flashUntil = now() + FLASH_MS;
+    this._flashUntil = t0base;
   }
   _detectSur(prev, state) {
     for (let s = 0; s < 2; s++) {
@@ -267,9 +278,18 @@ export class PasurRenderer {
     if (hi >= 0) {
       const card = this.hand[hi].card;
       if (this.staged && key(this.staged.card) === key(card)) { this.staged = null; this.sel.clear(); }
-      else { this.staged = { card }; this.sel.clear(); }
+      else { this.staged = { card }; this.sel.clear(); this._autoSelect(); }
       this.draw();
     }
+  }
+
+  /** When the staged number card has exactly ONE way to capture, pre-select it
+   *  (capture is mandatory, so there's no point making the user click it). */
+  _autoSelect() {
+    if (!this.staged || this._isPicture(this.staged.card)) return;
+    const nums = (this.state.table || []).filter((c) => fishValue(c) != null);
+    const subs = subsetsSummingTo(nums, this._target());
+    if (subs.length === 1) this.sel = new Set(subs[0].map(key));
   }
 
   _commit() {
@@ -279,12 +299,14 @@ export class PasurRenderer {
     if (this._isPicture(card)) {
       capture = [];
     } else {
-      const sum = this._selSum();
-      if (this.sel.size && sum === this._target()) {
+      const nums = (this.state.table || []).filter((c) => fishValue(c) != null);
+      const canCapture = subsetsSummingTo(nums, this._target()).length > 0;
+      if (canCapture) {
+        // Capture is mandatory — only commit a valid selection summing to 11.
+        if (!this.sel.size || this._selSum() !== this._target()) return;
         capture = [...this.sel].map((k) => { const [s, r] = k.split(',').map(Number); return { s, r }; });
-      } else if (this.sel.size) {
-        return;
       }
+      // else: no capture possible → lay the card down (capture stays []).
     }
     this.onAction?.({ type: 'play', card: { s: card.s, r: card.r }, capture });
     this.staged = null; this.sel.clear();
@@ -302,6 +324,7 @@ export class PasurRenderer {
     if (this._flyCards.some((f) => t < f.t0 + f.dur)) return true;
     if (this._particles.length) return true;
     if (t < this._flashUntil) return true;
+    if (this._captureHold && t < this._captureHold.until) return true;
     if (t < this._surFx.until) return true;
     // gentle pulse while it's my turn (glow on playable cards)
     if (this.interactive && this.state && this.state.turn === this.mySeat && !this.state.winner && !this.state.draw) return true;
@@ -394,6 +417,7 @@ export class PasurRenderer {
     this._drawCapturePiles(ctx, S, st, oppSeat);
     this._drawOpponent(ctx, S, st, oppSeat);
     this._drawTable(ctx, S, st);
+    this._drawCaptureHold(ctx, S);
     this._drawMyHand(ctx, S, st);
     this._drawControls(ctx, S, st);
 
@@ -578,10 +602,14 @@ export class PasurRenderer {
       const target = this._target();
       const sum = this._selSum();
       const cur = sum + fishValue(card);
-      if (this.sel.size === 0) {
-        const has = this._capturable().size > 0;
-        hint = has ? 'برگ‌هایی را انتخاب کن که با کارتت ۱۱ شوند' : 'برداشتی ممکن نیست — روی میز گذاشته می‌شود';
+      const canCapture = this._capturable().size > 0;
+      if (!canCapture) {
+        hint = 'برداشتی ممکن نیست — روی میز گذاشته می‌شود';
         canPlay = true;
+      } else if (this.sel.size === 0) {
+        // Capture is mandatory: must pick a valid combination first.
+        hint = 'باید برگ بگیری — برگ‌هایی که با کارتت ۱۱ شوند را انتخاب کن';
+        canPlay = false;
       } else {
         hint = `جمع: ${fa(cur)} از ${fa(11)}` + (cur === 11 ? ' ✓' : '');
         canPlay = cur === 11;
@@ -609,6 +637,30 @@ export class PasurRenderer {
     ctx.fillStyle = 'rgba(255,255,255,.85)';
     ctx.fillText('لغو ✕', cx + bw / 2, byb + bh / 2);
     this.buttons.push({ id: 'cancel', x: cx, y: byb, w: bw, h: bh, enabled: true });
+  }
+
+  /* ── Captured cards lingering on the table before they fly to a pile ──── */
+  _drawCaptureHold(ctx, S) {
+    const ch = this._captureHold;
+    if (!ch || now() >= ch.until) return;
+    const pulse = 0.5 + 0.5 * Math.sin(now() / 150);
+    for (const g of ch.cards) {
+      this._cardFace(ctx, g.x, g.y, g.w, g.h, g.card, false);
+      ctx.save();
+      ctx.shadowColor = ch.color; ctx.shadowBlur = 10 + 10 * pulse;
+      this._cardOutline(ctx, g.x, g.y, g.w, g.h, ch.color, 3.5);
+      ctx.restore();
+    }
+    // little "who took it" tag above the held cards
+    const top = ch.cards.reduce((m, g) => Math.min(m, g.y), Infinity);
+    const cx = ch.cards.reduce((s, g) => s + g.x + g.w / 2, 0) / ch.cards.length;
+    const label = ch.seat === this.mySeat ? 'تو برداشتی' : 'حریف برداشت';
+    ctx.save();
+    ctx.globalAlpha = 0.6 + 0.4 * pulse;
+    ctx.fillStyle = ch.color; ctx.font = `bold ${S * 0.026}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(label, cx, top - S * 0.012);
+    ctx.restore();
   }
 
   /* ── Effects: flying cards, particles, sur ──────────────────────────── */

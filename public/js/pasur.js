@@ -199,14 +199,18 @@ export class PasurGame {
     for (const card of hand) {
       const forced = this._forcedCapture(card);
       if (forced) {
+        // Picture card: capture is computed authoritatively (may be empty = lay down).
         out.push({ type: 'play', card: clone(card), capture: forced.map(clone) });
       } else {
         const target = 11 - fishValue(card);
         const nums = this.table.filter((c) => fishValue(c) != null);
-        for (const sub of subsetsSummingTo(nums, target)) {
-          out.push({ type: 'play', card: clone(card), capture: sub.map(clone) });
+        const subs = subsetsSummingTo(nums, target);
+        if (subs.length) {
+          // Capture is MANDATORY when the card can take — no lay-down option.
+          for (const sub of subs) out.push({ type: 'play', card: clone(card), capture: sub.map(clone) });
+        } else {
+          out.push({ type: 'play', card: clone(card), capture: [] }); // lay down (nothing to take)
         }
-        out.push({ type: 'play', card: clone(card), capture: [] }); // lay down
       }
     }
     return out;
@@ -244,6 +248,12 @@ export class PasurGame {
         }
         const sum = captured.reduce((a, c) => a + fishValue(c), 0);
         if (sum !== target) throw new Error('برداشت نامعتبر — مجموع باید ۱۱ شود');
+      } else {
+        // Mandatory capture: a card that COULD take may not be laid down.
+        const nums = this.table.filter((c) => fishValue(c) != null);
+        if (subsetsSummingTo(nums, target).length) {
+          throw new Error('این کارت می‌تواند برگ بردارد — برداشت اجباری است');
+        }
       }
     }
 
@@ -257,7 +267,10 @@ export class PasurGame {
       this.table = this.table.filter((c) => !capSet.has(c.s * 100 + c.r));
       this.captured[seat].push(clone(card), ...captured);
       this.lastCapturer = seat;
-      if (this.table.length === 0) this.surs[seat]++;   // سور!
+      // سور: clearing the table scores a bonus — but NOT with a سرباز (Jack),
+      // and NOT during the final round (deck exhausted, no more deals).
+      const finalRound = this.deck.length === 0;
+      if (this.table.length === 0 && card.r !== 11 && !finalRound) this.surs[seat]++;
     }
 
     this.moveCount++;
