@@ -722,6 +722,7 @@ export class GameManager {
     if (room._pasurAdvance) { clearTimeout(room._pasurAdvance); room._pasurAdvance = null; }
     if (!room.game.nextRound()) return;
     room.lastActivity = Date.now();
+    room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
     this.startClock(room);
     this.resetIdleTimer(room);
     this.emitPerSeat(room, 'game:update', (s) => ({
