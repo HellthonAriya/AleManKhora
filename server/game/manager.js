@@ -51,6 +51,7 @@ function buildEngine(gameType, config) {
       players: config.players, maxTurns: config.maxTurns,
       startCash: config.startCash, goSalary: config.goSalary,
       freeParkingJackpot: config.freeParkingJackpot, goDoubleOnExact: config.goDoubleOnExact,
+      auctions: config.auctions,
     });
     default: return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
   }
@@ -157,6 +158,7 @@ function sanitizeMonopolyConfig(cfg) {
     startCash, goSalary, gameLength, maxTurns: players * perPlayer,
     freeParkingJackpot: !!cfg.freeParkingJackpot,
     goDoubleOnExact: !!cfg.goDoubleOnExact,
+    auctions: !!cfg.auctions,
   };
 }
 

@@ -43,6 +43,22 @@ export function chooseMonopolyAction(game, seat, difficulty = 'normal') {
   const has = (type) => moves.find((m) => m.type === type);
   const cash = game.money[seat];
 
+  // 0) Auction — bid up to a willingness derived from how much the tile helps.
+  if (game.auction) {
+    const a = game.auction;
+    const t = BOARD[a.tile];
+    const price = t.price || 100;
+    const appeal = buyAppeal(game, seat, a.tile);           // 0..1
+    const eager = difficulty === 'hard' ? 1.15 : difficulty === 'normal' ? 0.95 : 0.75;
+    const max = Math.min(cash - 10, Math.round(price * (0.45 + appeal) * eager));
+    const bidMove = has('bid');
+    if (bidMove && bidMove.amount <= max) {
+      const step = Math.max(10, Math.round(price * 0.1));
+      return { type: 'bid', amount: Math.min(max, a.high + step, cash) };
+    }
+    return { type: 'auctionPass' };
+  }
+
   // 1) Debt — raise money, then settle, else go bankrupt.
   if (game.pending?.kind === 'debt') {
     if (has('pay')) return { type: 'pay' };

@@ -433,6 +433,7 @@ export class MonopolyRenderer {
   _drawActions(x0, y, w, h) {
     const ctx = this.ctx, st = this.state;
     if (st.winner != null || st.draw) return;
+    if (st.auction) { this._drawAuction(x0, y, w, h); return; }
     const mine = this._isMyTurn();
     const legal = mine ? (st.legal || []) : [];
     const has = (t) => legal.some((m) => m.type === t);
@@ -481,6 +482,29 @@ export class MonopolyRenderer {
       this._button(b.id, bx, by, bw, bh, b.label, b.kind, b.action);
       bx += bw + gap;
     }
+  }
+  _drawAuction(x0, y, w, h) {
+    const ctx = this.ctx, st = this.state, a = st.auction, t = BOARD[a.tile];
+    ctx.fillStyle = GOLD; ctx.font = `bold ${w * 0.05}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`🔨 حراجِ ${t.name}`, x0 + w / 2, y - h * 0.32);
+    ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.font = `${w * 0.038}px sans-serif`;
+    const highTxt = a.bidder >= 0 ? `بالاترین پیشنهاد: ${fa(a.high)} — بازیکن ${fa(a.bidder + 1)}` : 'هنوز پیشنهادی نیست';
+    ctx.fillText(highTxt, x0 + w / 2, y - h * 0.04);
+    if (!this._isMyTurn()) {
+      ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = `${w * 0.038}px sans-serif`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`در انتظار پیشنهادِ بازیکن ${fa(st.turn + 1)}…`, x0 + w / 2, y + h * 0.55);
+      return;
+    }
+    const cash = st.money[this.mySeat];
+    const btns = [10, 50, 100].filter((inc) => a.high + inc <= cash)
+      .map((inc) => ({ id: 'bid' + inc, label: `+${fa(inc)} (${fa(a.high + inc)})`, action: { type: 'bid', amount: a.high + inc }, kind: 'good' }));
+    btns.push({ id: 'auctionPass', label: 'کنار می‌کشم', action: { type: 'auctionPass' }, kind: 'plain' });
+    const gap = w * 0.015, bw = Math.min(w * 0.3, (w * 0.94 - (btns.length - 1) * gap) / btns.length);
+    const totalW = btns.length * bw + (btns.length - 1) * gap;
+    let bx = x0 + (w - totalW) / 2; const bh = h * 0.62, by = y + h * 0.2;
+    for (const b of btns) { this._button(b.id, bx, by, bw, bh, b.label, b.kind, b.action); bx += bw + gap; }
   }
   _button(id, x, y, w, h, label, kind, action) {
     const ctx = this.ctx;

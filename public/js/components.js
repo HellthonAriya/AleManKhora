@@ -35,7 +35,7 @@ const MONOPOLY_COLORS = ['#e7503a', '#3d7fe0', '#3bb15f', '#e8b730'];
 export function MonopolyCustomizer() {
   const cfg = {
     gameType: 'monopoly', players: 2, colors: [...MONOPOLY_COLORS], timeLimit: 0, timeIncrement: 0,
-    startCash: 1500, goSalary: 200, gameLength: 'normal', freeParkingJackpot: false, goDoubleOnExact: false,
+    startCash: 1500, goSalary: 200, gameLength: 'normal', freeParkingJackpot: false, goDoubleOnExact: false, auctions: false,
   };
 
   const colorsMount = h('div', {});
@@ -98,6 +98,7 @@ export function MonopolyCustomizer() {
         optGroup('طول بازی', lengthSeg),
         optGroup('جایزهٔ پارکینگ رایگان (مالیات‌ها در وسط جمع شود)', onOff('freeParkingJackpot')),
         optGroup('حقوق دوبل با ایستادن دقیق روی «شروع»', onOff('goDoubleOnExact')),
+        optGroup('حراج (ملکِ خریده‌نشده به حراج برود)', onOff('auctions')),
       )),
     colorsMount,
     h('p', { class: 'faint', style: 'margin-top:6px' }, 'ملک بخر، با مالکیت کاملِ یک رنگ خانه و هتل بساز و حریفان را ورشکست کن. آخرین بازمانده برنده است.'),
@@ -110,6 +111,7 @@ export function MonopolyCustomizer() {
       timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement,
       startCash: cfg.startCash, goSalary: cfg.goSalary, gameLength: cfg.gameLength,
       freeParkingJackpot: cfg.freeParkingJackpot, goDoubleOnExact: cfg.goDoubleOnExact,
+      auctions: cfg.auctions,
     }),
   };
 }

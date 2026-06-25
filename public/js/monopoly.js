@@ -159,7 +159,9 @@ export class MonopolyGame {
     this.goSalary = Number(opts.goSalary) > 0 ? Number(opts.goSalary) : GO_SALARY;
     this.freeParkingJackpot = !!opts.freeParkingJackpot; // taxes/fines pile in the centre
     this.goDoubleOnExact = !!opts.goDoubleOnExact;        // exact landing on «شروع» pays ×2
+    this.auctions = !!opts.auctions;                     // decline → property goes to auction
     this.pot = 0;                                         // centre pot (Free Parking rule)
+    this.auction = null;                                 // active auction, or null
     this.winner = null;
     this.draw = false;
     this.endReason = null;
@@ -261,6 +263,7 @@ export class MonopolyGame {
       legal: this.legalMoves(this.turn),
       startCash: this.startCash, goSalary: this.goSalary,
       pot: this.pot, freeParkingJackpot: this.freeParkingJackpot, goDoubleOnExact: this.goDoubleOnExact,
+      auctions: this.auctions, auction: this.auction ? { ...this.auction, out: this.auction.out.slice() } : null,
     };
   }
   toStateFor(viewer) {
@@ -285,6 +288,8 @@ export class MonopolyGame {
     g.goSalary = state.goSalary || GO_SALARY;
     g.freeParkingJackpot = !!state.freeParkingJackpot;
     g.goDoubleOnExact = !!state.goDoubleOnExact;
+    g.auctions = !!state.auctions;
+    g.auction = state.auction ? { ...state.auction, out: (state.auction.out || []).slice() } : null;
     g.pot = state.pot || 0;
     g.money = (state.money || []).slice();
     g.pos = (state.pos || []).slice();
@@ -311,6 +316,13 @@ export class MonopolyGame {
     if (this.isOver() || seat !== this.turn || this.eliminated[seat]) return [];
     const out = [];
     const cash = this.money[seat];
+
+    if (this.auction) {
+      const min = this.auction.high + 1;
+      if (cash >= min) out.push({ type: 'bid', amount: min });
+      out.push({ type: 'auctionPass' });
+      return out;
+    }
 
     if (this.pending?.kind === 'debt') {
       const amt = this.pending.amount;
@@ -396,7 +408,11 @@ export class MonopolyGame {
 
     this.lastCard = null; // cleared each action; set when a card is drawn
 
+    if (this.auction && type !== 'bid' && type !== 'auctionPass') throw new Error('حراج در جریان است');
+
     switch (type) {
+      case 'bid': this._bid(seat, action.amount); break;
+      case 'auctionPass': this._auctionPass(seat); break;
       case 'roll': this._roll(seat, false); break;
       case 'jailRoll': this._roll(seat, true); break;
       case 'jailPay': this._requirePending(false); this._payJail(seat); break;
@@ -621,9 +637,63 @@ export class MonopolyGame {
   }
   _pass(seat) {
     if (this.pending?.kind !== 'buy') throw new Error('چیزی برای رد کردن نیست');
-    this._logMsg(`${this._name(seat)} از خرید ${BOARD[this.pending.tile].name} گذشت.`);
+    const tile = this.pending.tile;
+    this._logMsg(`${this._name(seat)} از خرید ${BOARD[tile].name} گذشت.`);
     this.pending = null;
+    if (this.auctions && this.activePlayers().length > 1) { this._startAuction(tile, seat); return; }
     this._afterResolve(seat);
+  }
+
+  /* ------------------------------- auction ------------------------------- */
+  _startAuction(tile, lander) {
+    this.auction = {
+      tile, high: 0, bidder: -1, lander,
+      out: new Array(this.numPlayers).fill(false),
+      cursor: (lander - 1 + this.numPlayers) % this.numPlayers, // so the lander bids first
+    };
+    this._logMsg(`🔨 حراجِ ${BOARD[tile].name} شروع شد.`);
+    this._auctionNext();
+  }
+  _auctionNext() {
+    const a = this.auction;
+    const elig = this.range().filter((s) => !this.eliminated[s] && !a.out[s] && s !== a.bidder);
+    if (elig.length === 0) { if (a.bidder >= 0) this._auctionWin(); else this._auctionNoSale(); return; }
+    let s = a.cursor;
+    for (let k = 0; k < this.numPlayers; k++) {
+      s = (s + 1) % this.numPlayers;
+      if (elig.includes(s)) { a.cursor = s; this.turn = s; return; }
+    }
+    if (a.bidder >= 0) this._auctionWin(); else this._auctionNoSale();
+  }
+  _bid(seat, amount) {
+    const a = this.auction;
+    if (!a) throw new Error('حراجی در جریان نیست');
+    if (seat !== this.turn) throw new Error('نوبت پیشنهاد تو نیست');
+    amount = Math.floor(Number(amount) || 0);
+    if (amount <= a.high) throw new Error('پیشنهاد باید بیشتر باشد');
+    if (amount > this.money[seat]) throw new Error('پول کافی نداری');
+    a.high = amount; a.bidder = seat; a.cursor = seat;
+    this._logMsg(`${this._name(seat)} ${amount} پیشنهاد داد.`);
+    this._auctionNext();
+  }
+  _auctionPass(seat) {
+    const a = this.auction;
+    if (!a) throw new Error('حراجی در جریان نیست');
+    if (seat !== this.turn) throw new Error('نوبت تو نیست');
+    a.out[seat] = true; a.cursor = seat;
+    this._logMsg(`${this._name(seat)} از حراج کنار کشید.`);
+    this._auctionNext();
+  }
+  _auctionWin() {
+    const a = this.auction, t = BOARD[a.tile], lander = a.lander;
+    this.money[a.bidder] -= a.high; this.owner[a.tile] = a.bidder;
+    this._logMsg(`${this._name(a.bidder)} ${t.name} را در حراج به ${a.high} برد.`);
+    this.auction = null; this.turn = lander; this._afterResolve(lander);
+  }
+  _auctionNoSale() {
+    const a = this.auction, lander = a.lander;
+    this._logMsg(`حراجِ ${BOARD[a.tile].name} بدون خریدار ماند.`);
+    this.auction = null; this.turn = lander; this._afterResolve(lander);
   }
 
   _build(seat, i) {
