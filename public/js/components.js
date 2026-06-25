@@ -25,8 +25,63 @@ const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'p
 export function makeCustomizer(gameType, opts = {}) {
   if (gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade') return ChessCustomizer({ gameType, ...opts });
   if (gameType === 'hokm') return HokmCustomizer(opts);
+  if (gameType === 'monopoly') return MonopolyCustomizer(opts);
   if (SIMPLE_TYPES.includes(gameType)) return SimpleCustomizer({ gameType, ...opts });
   return GameCustomizer(opts);
+}
+
+const MONOPOLY_COLORS = ['#e7503a', '#3d7fe0', '#3bb15f', '#e8b730'];
+/** Monopoly customizer: player count (2–4), per-seat colours, time control. */
+export function MonopolyCustomizer() {
+  const cfg = { gameType: 'monopoly', players: 2, colors: [...MONOPOLY_COLORS], timeLimit: 0, timeIncrement: 0 };
+
+  const colorsMount = h('div', {});
+  function colorPick(idx) {
+    const wrap = h('div', { class: 'swatches' });
+    SIMPLE_SWATCHES.forEach((col) => {
+      wrap.append(h('div', {
+        class: 'swatch' + (col === cfg.colors[idx] ? ' active' : ''),
+        style: `background:${col}`,
+        onclick: () => { cfg.colors[idx] = col; [...wrap.children].forEach((c, i) => c.classList.toggle('active', SIMPLE_SWATCHES[i] === col)); pickInput.value = col; },
+      }));
+    });
+    const pickInput = h('input', { type: 'color', value: cfg.colors[idx],
+      oninput: (e) => { cfg.colors[idx] = e.target.value; [...wrap.children].forEach((c) => c.classList.remove('active')); } });
+    wrap.append(h('div', { class: 'color-pick' }, pickInput));
+    return wrap;
+  }
+  function rebuildColors() {
+    colorsMount.innerHTML = '';
+    for (let i = 0; i < cfg.players; i++) {
+      colorsMount.append(optGroup(i === 0 ? 'رنگ تو' : `رنگ بازیکن ${['۱', '۲', '۳', '۴'][i]}`, colorPick(i)));
+    }
+  }
+  rebuildColors();
+
+  const playerSeg = seg([
+    { label: '۲ نفره', value: 2, active: true },
+    { label: '۳ نفره', value: 3, active: false },
+    { label: '۴ نفره', value: 4, active: false },
+  ], (v) => { cfg.players = Number(v); rebuildColors(); });
+
+  const timeSeg = seg(TIME_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeLimit })),
+    (v) => { cfg.timeLimit = v; incMount.style.display = v ? '' : 'none'; });
+  const incMount = h('div', { style: 'display:none' },
+    optGroup('پاداش زمانی هر حرکت', seg(INC_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeIncrement })),
+      (v) => { cfg.timeIncrement = v; })));
+
+  const element = h('div', {},
+    optGroup('تعداد بازیکنان', playerSeg),
+    optGroup('کنترل زمان (تایمر)', timeSeg),
+    incMount,
+    colorsMount,
+    h('p', { class: 'faint', style: 'margin-top:6px' }, 'ملک بخر، با مالکیت کاملِ یک رنگ خانه و هتل بساز و حریفان را ورشکست کن. آخرین بازمانده برنده است.'),
+  );
+
+  return {
+    element,
+    getConfig: () => ({ gameType: 'monopoly', players: cfg.players, colors: cfg.colors.slice(0, cfg.players), timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement }),
+  };
 }
 
 const HOKM_COLORS = ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'];

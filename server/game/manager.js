@@ -15,6 +15,7 @@ import { DotsGame } from './dots.js';
 import { BackgammonGame } from './backgammon.js';
 import { HokmGame } from './hokm.js';
 import { PasurGame } from './pasur.js';
+import { MonopolyGame } from './monopoly.js';
 import { chooseAction } from './ai.js';
 import { chooseChessAction } from './chessAI.js';
 import { chooseTicTacToeAction } from './tictactoeAI.js';
@@ -24,11 +25,12 @@ import { chooseDotsAction } from './dotsAI.js';
 import { chooseBackgammonAction } from './backgammonAI.js';
 import { chooseHokmAction } from './hokmAI.js';
 import { choosePasurAction } from './pasurAI.js';
+import { chooseMonopolyAction } from './monopolyAI.js';
 import { Games, GameStats, Achievements, Users, applyEloResult, applyEloDraw } from '../models.js';
 import { evaluateAchievements, ACHIEVEMENT_MAP } from '../../public/js/achievements.js';
 import db, { getSettings } from '../db.js';
 
-const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'hokm', 'pasur'];
+const GAME_TYPES = ['quoridor', 'chess', 'chess4', 'chesszade', 'tictactoe', 'gomoku', 'othello', 'dots', 'backgammon', 'hokm', 'pasur', 'monopoly'];
 // The simple 2-player board games that share one lightweight customizer/config.
 const SIMPLE_TYPES = ['tictactoe', 'gomoku', 'othello', 'dots', 'backgammon'];
 
@@ -45,6 +47,7 @@ function buildEngine(gameType, config) {
     case 'backgammon': return new BackgammonGame();
     case 'hokm': return new HokmGame({ variant: config.variant });
     case 'pasur': return new PasurGame();
+    case 'monopoly': return new MonopolyGame({ players: config.players });
     default: return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
   }
 }
@@ -129,6 +132,22 @@ function sanitizeChessConfig(cfg, gameType) {
   };
 }
 
+const MONOPOLY_DEFAULT_COLORS = ['#e7503a', '#3d7fe0', '#3bb15f', '#e8b730'];
+function sanitizeMonopolyConfig(cfg) {
+  const players = [2, 3, 4].includes(parseInt(cfg.players, 10)) ? parseInt(cfg.players, 10) : 2;
+  const colorRe = /^#[0-9a-fA-F]{6}$/;
+  const incoming = Array.isArray(cfg.colors) ? cfg.colors : [cfg.p0Color, cfg.p1Color];
+  const colors = [];
+  for (let i = 0; i < players; i++) colors.push(colorRe.test(incoming?.[i]) ? incoming[i] : MONOPOLY_DEFAULT_COLORS[i]);
+  const timeLimit = TIME_LIMITS.includes(parseInt(cfg.timeLimit, 10)) ? parseInt(cfg.timeLimit, 10) : 0;
+  const timeIncrement = TIME_INCREMENTS.includes(parseInt(cfg.timeIncrement, 10)) ? parseInt(cfg.timeIncrement, 10) : 0;
+  return {
+    gameType: 'monopoly', players, teams: false, colors,
+    p0Color: colors[0], p1Color: colors[1],
+    timeLimit, timeIncrement, ranked: false,
+  };
+}
+
 const HOKM_DEFAULT_COLORS = ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'];
 function sanitizeHokmConfig(cfg) {
   const variant = ['2', '3', '4'].includes(String(cfg.variant)) ? String(cfg.variant) : '4';
@@ -165,6 +184,7 @@ function sanitizeConfig(cfg = {}) {
   if (gameType === 'chess' || gameType === 'chess4' || gameType === 'chesszade') return sanitizeChessConfig(cfg, gameType);
   if (gameType === 'hokm') return sanitizeHokmConfig(cfg);
   if (gameType === 'pasur') return sanitizePasurConfig(cfg);
+  if (gameType === 'monopoly') return sanitizeMonopolyConfig(cfg);
   if (SIMPLE_TYPES.includes(gameType)) return sanitizeSimpleConfig(cfg, gameType);
 
   const s = getSettings();
@@ -749,6 +769,7 @@ export class GameManager {
       case 'backgammon': return chooseBackgammonAction(game, seat, diff, persona);
       case 'hokm': return chooseHokmAction(game, seat, diff, persona);
       case 'pasur': return choosePasurAction(game, seat, diff, persona);
+      case 'monopoly': return chooseMonopolyAction(game, seat, diff, persona);
       default: return chooseAction(game, seat, diff, persona);
     }
   }
@@ -857,6 +878,8 @@ export class GameManager {
       return 950 + Math.random() * 350; // mid-trick: relaxed, one card at a time
     }
     if (g.gameType === 'pasur') return 850 + Math.random() * 450; // unhurried card play
+    // Monopoly: let the dice tumble + token glide finish before the next action.
+    if (g.gameType === 'monopoly') return g.mustRoll ? 1100 + Math.random() * 400 : 1300 + Math.random() * 500;
     return 550 + Math.random() * 500;
   }
 

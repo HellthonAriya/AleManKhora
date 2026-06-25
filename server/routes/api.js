@@ -185,7 +185,7 @@ router.post('/friends/remove', requireUser, (req, res) => {
 
 /* ---------------------------- Leaderboard --------------------------------- */
 
-const LEADERBOARD_GAMES = ['quoridor', 'chess', 'chess4', 'chesszade', 'hokm', 'pasur', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'];
+const LEADERBOARD_GAMES = ['quoridor', 'chess', 'chess4', 'chesszade', 'hokm', 'pasur', 'monopoly', 'backgammon', 'othello', 'gomoku', 'dots', 'tictactoe'];
 
 router.get('/leaderboard', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 200);

@@ -10,6 +10,7 @@ import { BackgammonRenderer } from '../backgammonboard.js';
 import { HokmRenderer } from '../hokmboard.js';
 import { PasurRenderer } from '../pasurboard.js';
 import { showPasurReveal } from '../pasurReveal.js';
+import { MonopolyRenderer } from '../monopolyboard.js';
 import { openRules } from '../rules.js';
 import { VoiceChat } from '../voice.js';
 import { getSocket, navigate } from '../app.js';
@@ -20,7 +21,7 @@ const GAME_NAMES = {
   quoridor: '🧱 اَلِ من خورا', chess: '♛ شطرنج', chess4: '♞ شطرنج ۴ نفره',
   chesszade: '🔀 شطرنج زاده‌ای', hokm: '🃏 حکم', pasur: '🎴 پاسور',
   backgammon: '🎲 تخته‌نرد', othello: '⚫ اوتلو', gomoku: '⬤ گوموکو',
-  dots: '▦ نقطه‌خط', tictactoe: '✕ دوز',
+  dots: '▦ نقطه‌خط', tictactoe: '✕ دوز', monopoly: '🎩 مونوپولی',
 };
 const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const PIECE_FA = { p: 'سرباز', n: 'اسب', b: 'فیل', r: 'رخ', q: 'وزیر', k: 'شاه' };
@@ -97,6 +98,8 @@ export function GameView(roomId) {
       renderer = new HokmRenderer(canvas, { onAction: act });
     } else if (gameType === 'pasur') {
       renderer = new PasurRenderer(canvas, { onAction: act });
+    } else if (gameType === 'monopoly') {
+      renderer = new MonopolyRenderer(canvas, { onAction: act });
     } else {
       // دوز / گوموکو / اوتلو — shared grid renderer (dispatches on state.gameType)
       renderer = new GridRenderer(canvas, { onAction: act });
@@ -412,6 +415,14 @@ export function GameView(roomId) {
           h('div', { class: 'pc-walls' }, `🃏 ${faNum(cards)} برگ · ♣ ${faNum(clubs)} · سور ${faNum(surs)}`),
           pts != null ? h('span', { class: 'faint' }, `${faNum(pts)} امتیاز`) : null);
       }
+      case 'monopoly': {
+        const money = state.money?.[s] ?? 0;
+        const props = (state.owner || []).filter((o) => o === s).length;
+        const jail = state.inJail?.[s];
+        return h('div', {},
+          h('div', { class: 'pc-walls' }, `💵 ${faNum(money)} · 🏠 ${faNum(props)} ملک`),
+          (state.eliminated?.[s] ? h('span', { class: 'faint' }, 'ورشکست') : (jail ? h('span', { class: 'faint' }, 'در زندان') : null)));
+      }
       default: return h('div', {});
     }
   }
@@ -428,6 +439,7 @@ export function GameView(roomId) {
       case 'backgammon': return 'اول روی مهرهٔ خودت بزن، بعد روی خانهٔ مقصدِ نشان‌دار. تاس‌ها خودکار ریخته می‌شوند.';
       case 'hokm': return 'اگر حاکمی، اول حکم (خال برنده) را انتخاب کن. بعد به نوبت، یک ورق بازی کن؛ اگر خالِ زمین را داری باید همان را بازی کنی.';
       case 'pasur': return 'یک کارت از دستت را بزن تا انتخاب شود. با کارت عددی، برگ‌هایی از میز را بردار که مجموعشان با کارتت ۱۱ شود. سرباز همهٔ میز را جمع می‌کند.';
+      case 'monopoly': return 'تاس بریز تا حرکت کنی. روی ملک خالی که ایستادی می‌توانی بخری. با مالکیت کاملِ یک رنگ، روی ملک‌های نشان‌دار بزن تا خانه و هتل بسازی. آخرین بازمانده برنده است.';
       default: return '';
     }
   }
