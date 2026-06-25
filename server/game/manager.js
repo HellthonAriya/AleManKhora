@@ -47,7 +47,11 @@ function buildEngine(gameType, config) {
     case 'backgammon': return new BackgammonGame();
     case 'hokm': return new HokmGame({ variant: config.variant });
     case 'pasur': return new PasurGame();
-    case 'monopoly': return new MonopolyGame({ players: config.players });
+    case 'monopoly': return new MonopolyGame({
+      players: config.players, maxTurns: config.maxTurns,
+      startCash: config.startCash, goSalary: config.goSalary,
+      freeParkingJackpot: config.freeParkingJackpot, goDoubleOnExact: config.goDoubleOnExact,
+    });
     default: return new QuoridorGame({ size: config.size, wallsEach: config.walls, players: config.players });
   }
 }
@@ -141,10 +145,18 @@ function sanitizeMonopolyConfig(cfg) {
   for (let i = 0; i < players; i++) colors.push(colorRe.test(incoming?.[i]) ? incoming[i] : MONOPOLY_DEFAULT_COLORS[i]);
   const timeLimit = TIME_LIMITS.includes(parseInt(cfg.timeLimit, 10)) ? parseInt(cfg.timeLimit, 10) : 0;
   const timeIncrement = TIME_INCREMENTS.includes(parseInt(cfg.timeIncrement, 10)) ? parseInt(cfg.timeIncrement, 10) : 0;
+  // Optional house rules.
+  const startCash = [1000, 1500, 2000, 2500].includes(parseInt(cfg.startCash, 10)) ? parseInt(cfg.startCash, 10) : 1500;
+  const goSalary = [100, 200, 300].includes(parseInt(cfg.goSalary, 10)) ? parseInt(cfg.goSalary, 10) : 200;
+  const gameLength = ['short', 'normal', 'long'].includes(cfg.gameLength) ? cfg.gameLength : 'normal';
+  const perPlayer = gameLength === 'short' ? 55 : gameLength === 'long' ? 160 : 100;
   return {
     gameType: 'monopoly', players, teams: false, colors,
     p0Color: colors[0], p1Color: colors[1],
     timeLimit, timeIncrement, ranked: false,
+    startCash, goSalary, gameLength, maxTurns: players * perPlayer,
+    freeParkingJackpot: !!cfg.freeParkingJackpot,
+    goDoubleOnExact: !!cfg.goDoubleOnExact,
   };
 }
 

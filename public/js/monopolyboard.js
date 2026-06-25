@@ -306,8 +306,12 @@ export class MonopolyRenderer {
       ctx.font = `${r.w * 0.34}px serif`; ctx.fillText('🔒', cx, cy - fs * 0.3);
       ctx.fillStyle = INK; ctx.font = `bold ${fs}px sans-serif`; ctx.fillText('زندان', cx, cy + fs * 1.1);
     } else if (i === 20) { // free parking
-      ctx.font = `${r.w * 0.34}px serif`; ctx.fillText('🅿️', cx, cy - fs * 0.2);
-      ctx.fillStyle = INK; ctx.font = `bold ${fs * 0.92}px sans-serif`; ctx.fillText('پارکینگ', cx, cy + fs * 1.2);
+      ctx.font = `${r.w * 0.34}px serif`; ctx.fillText('🅿️', cx, cy - fs * 0.4);
+      ctx.fillStyle = INK; ctx.font = `bold ${fs * 0.92}px sans-serif`; ctx.fillText('پارکینگ', cx, cy + fs * 0.8);
+      if (this.state.freeParkingJackpot) {
+        ctx.fillStyle = '#2faa55'; ctx.font = `bold ${fs * 0.85}px sans-serif`;
+        ctx.fillText(`💰 ${fa(this.state.pot || 0)}`, cx, cy + fs * 1.9);
+      }
     } else if (i === 30) { // go to jail
       ctx.font = `${r.w * 0.34}px serif`; ctx.fillText('🚨', cx, cy - fs * 0.2);
       ctx.fillStyle = INK; ctx.font = `bold ${fs * 0.85}px sans-serif`; ctx.fillText('به زندان', cx, cy + fs * 1.2);

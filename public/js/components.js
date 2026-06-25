@@ -1,5 +1,5 @@
 /* اَلِ من خورا — Reusable UI components */
-import { h, PLAYER_COLORS, THEMES, store } from './core.js';
+import { h, PLAYER_COLORS, THEMES, store, faNum } from './core.js';
 import { BoardRenderer } from './board.js';
 import { QuoridorGame } from './engine.js';
 import { ChessBoardRenderer, BOARD_THEMES } from './chessboard.js';
@@ -33,7 +33,10 @@ export function makeCustomizer(gameType, opts = {}) {
 const MONOPOLY_COLORS = ['#e7503a', '#3d7fe0', '#3bb15f', '#e8b730'];
 /** Monopoly customizer: player count (2–4), per-seat colours, time control. */
 export function MonopolyCustomizer() {
-  const cfg = { gameType: 'monopoly', players: 2, colors: [...MONOPOLY_COLORS], timeLimit: 0, timeIncrement: 0 };
+  const cfg = {
+    gameType: 'monopoly', players: 2, colors: [...MONOPOLY_COLORS], timeLimit: 0, timeIncrement: 0,
+    startCash: 1500, goSalary: 200, gameLength: 'normal', freeParkingJackpot: false, goDoubleOnExact: false,
+  };
 
   const colorsMount = h('div', {});
   function colorPick(idx) {
@@ -70,17 +73,44 @@ export function MonopolyCustomizer() {
     optGroup('پاداش زمانی هر حرکت', seg(INC_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeIncrement })),
       (v) => { cfg.timeIncrement = v; })));
 
+  const cashSeg = seg([1000, 1500, 2000, 2500].map((v) => ({ label: faNum(v), value: v, active: v === cfg.startCash })),
+    (v) => { cfg.startCash = Number(v); });
+  const salarySeg = seg([100, 200, 300].map((v) => ({ label: faNum(v), value: v, active: v === cfg.goSalary })),
+    (v) => { cfg.goSalary = Number(v); });
+  const lengthSeg = seg([
+    { label: 'کوتاه', value: 'short' },
+    { label: 'معمولی', value: 'normal', active: true },
+    { label: 'بلند', value: 'long' },
+  ], (v) => { cfg.gameLength = v; });
+  const onOff = (key) => seg([
+    { label: 'خاموش', value: 0, active: true }, { label: 'روشن', value: 1 },
+  ], (v) => { cfg[key] = !!v; });
+
   const element = h('div', {},
     optGroup('تعداد بازیکنان', playerSeg),
     optGroup('کنترل زمان (تایمر)', timeSeg),
     incMount,
+    h('details', { style: 'margin-top:8px' },
+      h('summary', { style: 'cursor:pointer;color:var(--text-dim);font-weight:700;font-size:.84rem' }, '⚙️ قوانین اختیاری (خانه‌قاعده)'),
+      h('div', { style: 'margin-top:8px' },
+        optGroup('پول شروع', cashSeg),
+        optGroup('حقوق عبور از «شروع»', salarySeg),
+        optGroup('طول بازی', lengthSeg),
+        optGroup('جایزهٔ پارکینگ رایگان (مالیات‌ها در وسط جمع شود)', onOff('freeParkingJackpot')),
+        optGroup('حقوق دوبل با ایستادن دقیق روی «شروع»', onOff('goDoubleOnExact')),
+      )),
     colorsMount,
     h('p', { class: 'faint', style: 'margin-top:6px' }, 'ملک بخر، با مالکیت کاملِ یک رنگ خانه و هتل بساز و حریفان را ورشکست کن. آخرین بازمانده برنده است.'),
   );
 
   return {
     element,
-    getConfig: () => ({ gameType: 'monopoly', players: cfg.players, colors: cfg.colors.slice(0, cfg.players), timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement }),
+    getConfig: () => ({
+      gameType: 'monopoly', players: cfg.players, colors: cfg.colors.slice(0, cfg.players),
+      timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement,
+      startCash: cfg.startCash, goSalary: cfg.goSalary, gameLength: cfg.gameLength,
+      freeParkingJackpot: cfg.freeParkingJackpot, goDoubleOnExact: cfg.goDoubleOnExact,
+    }),
   };
 }
 

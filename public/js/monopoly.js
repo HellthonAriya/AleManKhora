@@ -154,6 +154,12 @@ export class MonopolyGame {
     // wealthiest player (by net worth) wins. ~100 turns each by default.
     this.maxTurns = Number(opts.maxTurns) > 0 ? Number(opts.maxTurns) : n * 100;
     this.turnsTaken = 0;
+    // Optional house rules (all default to the classic behaviour).
+    this.startCash = Number(opts.startCash) > 0 ? Number(opts.startCash) : START_CASH;
+    this.goSalary = Number(opts.goSalary) > 0 ? Number(opts.goSalary) : GO_SALARY;
+    this.freeParkingJackpot = !!opts.freeParkingJackpot; // taxes/fines pile in the centre
+    this.goDoubleOnExact = !!opts.goDoubleOnExact;        // exact landing on «شروع» pays ×2
+    this.pot = 0;                                         // centre pot (Free Parking rule)
     this.winner = null;
     this.draw = false;
     this.endReason = null;
@@ -162,7 +168,7 @@ export class MonopolyGame {
     this.moveCount = 0;
 
     // Per-player
-    this.money = new Array(n).fill(START_CASH);
+    this.money = new Array(n).fill(this.startCash);
     this.pos = new Array(n).fill(0);
     this.inJail = new Array(n).fill(false);
     this.jailTurns = new Array(n).fill(0);
@@ -253,7 +259,8 @@ export class MonopolyGame {
       log: this.log.slice(-6),
       chanceDeck: this.chanceDeck.slice(), chestDeck: this.chestDeck.slice(),
       legal: this.legalMoves(this.turn),
-      startCash: START_CASH, goSalary: GO_SALARY,
+      startCash: this.startCash, goSalary: this.goSalary,
+      pot: this.pot, freeParkingJackpot: this.freeParkingJackpot, goDoubleOnExact: this.goDoubleOnExact,
     };
   }
   toStateFor(viewer) {
@@ -274,6 +281,11 @@ export class MonopolyGame {
     g.moveCount = state.moveCount || 0;
     g.maxTurns = state.maxTurns || (g.numPlayers * 100);
     g.turnsTaken = state.turnsTaken || 0;
+    g.startCash = state.startCash || START_CASH;
+    g.goSalary = state.goSalary || GO_SALARY;
+    g.freeParkingJackpot = !!state.freeParkingJackpot;
+    g.goDoubleOnExact = !!state.goDoubleOnExact;
+    g.pot = state.pot || 0;
     g.money = (state.money || []).slice();
     g.pos = (state.pos || []).slice();
     g.inJail = (state.inJail || []).slice();
@@ -435,7 +447,7 @@ export class MonopolyGame {
       if (this.jailTurns[seat] >= 3) {
         this._logMsg(`${this._name(seat)} سه بار جفت نیاورد — ۵۰ جریمه داد.`);
         this.inJail[seat] = false; this.jailTurns[seat] = 0;
-        this._charge(seat, JAIL_FINE, -1);
+        this._fee(seat, JAIL_FINE);
         if (this.pending) return;           // couldn't pay → debt
         this.lastRollWasDouble = false;
         this._advance(seat, sum); return;
@@ -462,7 +474,12 @@ export class MonopolyGame {
   _advance(seat, steps) {
     const before = this.pos[seat];
     let p = (before + steps) % 40;
-    if (before + steps >= 40) { this.money[seat] += GO_SALARY; this._logMsg(`${this._name(seat)} از «شروع» گذشت (+${GO_SALARY}).`); }
+    if (before + steps >= 40) {
+      let pay = this.goSalary;
+      if (this.goDoubleOnExact && p === 0) pay *= 2;   // exact landing on «شروع»
+      this.money[seat] += pay;
+      this._logMsg(`${this._name(seat)} ${p === 0 && this.goDoubleOnExact ? 'دقیقاً روی «شروع» ایستاد' : 'از «شروع» گذشت'} (+${pay}).`);
+    }
     this.pos[seat] = p;
     this._resolve(seat, steps);
   }
@@ -473,8 +490,15 @@ export class MonopolyGame {
     const t = BOARD[i];
 
     if (t.type === 'gotojail') { this._logMsg(`${this._name(seat)} به زندان رفت.`); this._sendToJail(seat); this.mustRoll = false; return; }
-    if (t.type === 'go' || t.type === 'jail' || t.type === 'parking') { this._afterResolve(seat); return; }
-    if (t.type === 'tax') { this._logMsg(`${this._name(seat)} ${t.tax} مالیات داد.`); this._charge(seat, t.tax, -1); this._afterResolve(seat); return; }
+    if (t.type === 'parking') {
+      if (this.freeParkingJackpot && this.pot > 0) {
+        this._logMsg(`${this._name(seat)} جایزهٔ پارکینگ را برد (+${this.pot})!`);
+        this.money[seat] += this.pot; this.pot = 0;
+      }
+      this._afterResolve(seat); return;
+    }
+    if (t.type === 'go' || t.type === 'jail') { this._afterResolve(seat); return; }
+    if (t.type === 'tax') { this._logMsg(`${this._name(seat)} ${t.tax} مالیات داد.`); this._fee(seat, t.tax); if (!this.pending) this._afterResolve(seat); return; }
     if (t.type === 'chance' || t.type === 'chest') { this._drawCard(seat, t.type, diceSum); return; }
 
     // Property / rail / util
@@ -508,7 +532,7 @@ export class MonopolyGame {
     if (card.card) { this.jailCards[seat]++; this._afterResolve(seat); return; }
     if (card.jail) { this._sendToJail(seat); this.mustRoll = false; return; }
     if (typeof card.m === 'number') {
-      if (card.m >= 0) this.money[seat] += card.m; else this._charge(seat, -card.m, -1);
+      if (card.m >= 0) this.money[seat] += card.m; else this._fee(seat, -card.m);
       if (!this.pending) this._afterResolve(seat); return;
     }
     if (typeof card.each === 'number') {
@@ -530,7 +554,7 @@ export class MonopolyGame {
       let houses = 0, hotels = 0;
       BOARD.forEach((t, i) => { if (this.owner[i] === seat) { if (this.houses[i] === 5) hotels++; else houses += this.houses[i]; } });
       const cost = houses * card.repair[0] + hotels * card.repair[1];
-      this._charge(seat, cost, -1); if (!this.pending) this._afterResolve(seat); return;
+      this._fee(seat, cost); if (!this.pending) this._afterResolve(seat); return;
     }
     if (typeof card.to === 'number') {
       const steps = (card.to - this.pos[seat] + 40) % 40;
@@ -575,6 +599,7 @@ export class MonopolyGame {
     if (!this.inJail[seat]) throw new Error('در زندان نیستی');
     if (this.money[seat] < JAIL_FINE) throw new Error('پول کافی نداری');
     this.money[seat] -= JAIL_FINE; this.inJail[seat] = false; this.jailTurns[seat] = 0;
+    if (this.freeParkingJackpot) this.pot += JAIL_FINE;
     this._logMsg(`${this._name(seat)} ۵۰ داد و از زندان آزاد شد — حالا تاس بریز.`);
     // still must roll & move this turn
   }
@@ -643,15 +668,24 @@ export class MonopolyGame {
     }
     this.pending = { kind: 'debt', amount, creditor };
   }
-  _debtCheck(seat, creditor) {
-    if (this.money[seat] < 0) { const amt = -this.money[seat]; this.money[seat] = 0; this.pending = { kind: 'debt', amount: amt, creditor }; }
+  /** A fee/fine to the bank — diverted to the centre pot under the Free Parking
+   *  house rule. Opens a debt (tagged toPot) if the player is short. */
+  _fee(seat, amount) {
+    if (amount <= 0) return;
+    if (this.money[seat] >= amount) {
+      this.money[seat] -= amount;
+      if (this.freeParkingJackpot) this.pot += amount;
+      return;
+    }
+    this.pending = { kind: 'debt', amount, creditor: -1, toPot: this.freeParkingJackpot };
   }
   _payDebt(seat) {
     if (this.pending?.kind !== 'debt') throw new Error('بدهی‌ای نیست');
-    const { amount, creditor } = this.pending;
+    const { amount, creditor, toPot } = this.pending;
     if (this.money[seat] < amount) throw new Error('هنوز پول کافی نداری');
     this.money[seat] -= amount;
     if (creditor >= 0) this.money[creditor] += amount;
+    else if (toPot) this.pot += amount;
     this.pending = null;
     this._afterResolve(seat);
   }
