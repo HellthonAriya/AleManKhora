@@ -860,7 +860,10 @@ export function GameView(roomId) {
     'room:update': (v) => applyView(v),
     'game:update': ({ state: s }) => {
       state = s; syncRenderer();
-      if (maybePasurReveal(s, false)) return;
+      // Between-rounds reveal only while the match is still going. When the
+      // final round ends the state already carries the winner — let `game:over`
+      // play the FINAL reveal (with the result), not a stray «دست بعد» one.
+      if (!gameIsOver() && maybePasurReveal(s, false)) return;
       if (status === 'active' && !gameIsOver()) playSound(isMyTurnActive() ? 'turn' : 'move');
     },
     'game:clock': (cv) => { setClock(cv); },

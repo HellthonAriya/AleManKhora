@@ -35,7 +35,10 @@ const GOLD = '#ffd76b', GREEN = '#5be08c';
 const FLASH_MS = 650, FLY_MS = 440, DEAL_MS = 380, DEAL_STAGGER = 65, SUR_MS = 1600;
 // How long captured cards linger (outlined in the capturer's colour) before
 // flying to the pile — so you can SEE what the opponent just took.
-const CAP_HOLD_MS = 950;
+const CAP_HOLD_MS = 1100;
+// A deliberate breath AFTER a play fully settles (cards in the pile) before the
+// next state is processed and input unlocks — so plays don't snap together.
+const POST_GAP = 360;
 
 // Layout bands (fractions of the square canvas S).
 const INFO_Y = 0.022, INFO_H = 0.058;
@@ -221,7 +224,7 @@ export class PasurRenderer {
         t0: now(), dur: FLY_MS, w: slot.w, h: slot.h, faceDown: false,
         kind: 'layin', accent: color, arcH: S * 0.05,
       });
-      this._playAnimUntil = now() + FLY_MS + 120;   // lock input until it lands
+      this._playAnimUntil = now() + FLY_MS + POST_GAP;   // lock input until it lands + a beat
       return;
     }
 
@@ -269,7 +272,7 @@ export class PasurRenderer {
       });
     });
     // Lock input / queue the next state until the last card reaches the pile.
-    this._playAnimUntil = tFly + (group.length - 1) * 40 + FLY_MS + 120;
+    this._playAnimUntil = tFly + (group.length - 1) * 40 + FLY_MS + POST_GAP;
   }
 
   _detectSur(prev, state) {

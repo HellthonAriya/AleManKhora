@@ -36,6 +36,7 @@ export class BackgammonRenderer {
     this._pendingBurst = null;  // { at, x, y, color, n } spark burst fired on arrival
     this._shockwaves = [];      // [ { x, y, t0, dur, color } ] expanding impact rings
     this._diceUntil = 0;        // tumbling-dice animation end timestamp
+    this._diceSettleT = null;   // one-shot timer that guarantees the settle redraw
     this._rolledKey = null;     // turn identity for which we've already rolled
     this._curTurn = null;
     this._init = false;
@@ -56,6 +57,18 @@ export class BackgammonRenderer {
     window.removeEventListener('resize', this._onResize);
     document.removeEventListener('visibilitychange', this._onVis);
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+    if (this._diceSettleT) { clearTimeout(this._diceSettleT); this._diceSettleT = null; }
+  }
+
+  /** Begin the cosmetic dice tumble and GUARANTEE a settle redraw afterwards —
+   *  a one-shot timer fixes the case where the rAF loop stops on a tumbling
+   *  frame (which used to leave a stale/random face until the next tap). */
+  _startDiceTumble() {
+    this._diceUntil = now() + DICE_MS;
+    if (this._diceSettleT) clearTimeout(this._diceSettleT);
+    this._diceSettleT = setTimeout(() => { this._diceSettleT = null; this._ensureAnim(); this.draw(); }, DICE_MS + 40);
+    this._ensureAnim();
+    this.draw();
   }
 
   setConfig(config) { this.config = { ...this.config, ...config }; this.draw(); }
@@ -92,7 +105,7 @@ export class BackgammonRenderer {
     // on my own fresh turn I must tap the dice myself.
     const turnChanged = this._init && state.turn !== this._curTurn;
     if (this._init && turnChanged && state.turn !== this.mySeat && state.winner == null && countUsed(state) === 0) {
-      this._diceUntil = now() + DICE_MS; // opponent's roll tumbles into view
+      this._startDiceTumble(); // opponent's roll tumbles into view (then settles)
     }
     this._curTurn = state.turn;
     this._init = true;
@@ -257,9 +270,7 @@ export class BackgammonRenderer {
     // Roll first: any tap rolls the dice on my fresh turn.
     if (this._needRoll()) {
       this._rolledKey = this._turnKey(this.state);
-      this._diceUntil = now() + DICE_MS;
-      this._ensureAnim();
-      this.draw();
+      this._startDiceTumble();
       return;
     }
     if (now() < this._diceUntil) return; // ignore taps while dice tumble
@@ -560,14 +571,21 @@ export class BackgammonRenderer {
 
     const rolled = st.rolled || [];
     if (!rolled.length) return;
+
+    // While tumbling, show just TWO dice with random faces; the real values
+    // (and the 4-die spread for doubles) reveal together when they settle.
+    if (now() < this._diceUntil) {
+      const n = 2, w = n * sz + (n - 1) * gap;
+      const x0 = cxMid - w / 2, y0 = cy - sz / 2;
+      for (let i = 0; i < n; i++) this._dieFace(ctx, x0 + i * (sz + gap), y0, sz, 1 + Math.floor(Math.random() * 6), false, false);
+      return;
+    }
+
     const disp = diceDisplay(st);
-    const tumbling = now() < this._diceUntil;
     const w = disp.length * sz + (disp.length - 1) * gap;
     const x0 = cxMid - w / 2, y0 = cy - sz / 2;
     disp.forEach((entry, i) => {
-      const x = x0 + i * (sz + gap);
-      const val = tumbling ? 1 + Math.floor(Math.random() * 6) : entry.d;
-      this._dieFace(ctx, x, y0, sz, val, false, !tumbling && entry.spent);
+      this._dieFace(ctx, x0 + i * (sz + gap), y0, sz, entry.d, false, entry.spent);
     });
   }
   _dieFace(ctx, x, y, sz, val, blank, spent) {
