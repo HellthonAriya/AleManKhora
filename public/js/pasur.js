@@ -98,6 +98,10 @@ export class PasurGame {
     this.eliminated = [false, false];
     this.moveCount = 0;
     this.hidden = true;
+    // The most recent play (public info), so the client can animate the card
+    // arriving, show what it sweeps, then fly it to the pile. Cleared each round.
+    this.lastPlay = null;
+    this._playSeq = 0;
 
     this._dealRound();
   }
@@ -155,6 +159,12 @@ export class PasurGame {
       deck: this.deck.map(clone),   // hidden — redacted by toStateFor
       deckCount: this.deck.length,
       lastCapturer: this.lastCapturer,
+      lastPlay: this.lastPlay ? {
+        id: this.lastPlay.id, seat: this.lastPlay.seat,
+        card: clone(this.lastPlay.card),
+        captured: this.lastPlay.captured.map(clone),
+        placed: this.lastPlay.placed,
+      } : null,
       scores: this.scores ? this.scores.slice() : null,
       winner: this.winner,
       draw: this.draw,
@@ -198,6 +208,8 @@ export class PasurGame {
     g.deck = (state.deck || []).map(clone);
     g.deckCount = state.deckCount;
     g.lastCapturer = state.lastCapturer;
+    g.lastPlay = state.lastPlay || null;
+    g._playSeq = state.lastPlay?.id || 0;
     g.scores = state.scores ? state.scores.slice() : null;
     g.winner = state.winner;
     g.draw = state.draw;
@@ -307,6 +319,12 @@ export class PasurGame {
       if (this.table.length === 0 && card.r !== 11) this.surs[seat]++;
     }
 
+    // Record the play (public) for the client's capture animation.
+    this.lastPlay = {
+      id: ++this._playSeq, seat,
+      card: clone(card), captured: captured.map(clone), placed,
+    };
+
     this.moveCount++;
     this.turn = 1 - seat;
 
@@ -394,6 +412,7 @@ export class PasurGame {
     this.roundNumber++;
     this.dealer = 1 - this.dealer;
     this.roundResult = null;
+    this.lastPlay = null;       // don't replay last round's capture animation
     this._dealRound();
     return true;
   }

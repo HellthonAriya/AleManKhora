@@ -71,7 +71,8 @@ export class PasurRenderer {
     this._surFx = { until: 0, seat: -1 };
     this._flashUntil = 0;
     this._flashKeys = new Set();
-    this._captureHold = null;  // { until, seat, color, cards:[{card,x,y,w,h}] }
+    this._captureHold = null;  // { until, seat, color, cards:[{card,x,y,w,h,appearAt}] }
+    this._shownPlayId = 0;     // id of the last play we've already animated
     this._dealKeys = new Set();    // keys of cards mid-deal (skip in static layer)
     this._oppFlyCount = 0;         // face-down deal cards heading to opponent
     this._raf = null;
@@ -105,8 +106,18 @@ export class PasurRenderer {
     this.state = state;
     try { this.engine = PasurGame.fromState(state); } catch { this.engine = null; }
 
-    if (prev && state) {
-      this._detectCapture(prev, state);
+    if (!prev) {
+      // First state (join / rejoin): sync the play id so we don't replay a
+      // capture that already happened before we were watching.
+      this._shownPlayId = state?.lastPlay?.id ?? 0;
+    } else if (state) {
+      const lp = state.lastPlay;
+      if (lp && lp.id !== this._shownPlayId) {
+        this._shownPlayId = lp.id;
+        this._animatePlay(prev, state, lp);   // exact, authoritative animation
+      } else if (!lp) {
+        this._detectCapture(prev, state);     // fallback for older states
+      }
       this._detectSur(prev, state);
     }
     this._detectDeal(prev, state);
@@ -151,6 +162,73 @@ export class PasurRenderer {
     this._flashKeys = new Set(gone.map(key));
     this._flashUntil = t0base;
   }
+  /** Authoritative play animation driven by state.lastPlay. The played card
+   *  flies in from the player who played it, lingers (showing exactly which
+   *  table cards it sweeps, outlined in that player's colour), then the whole
+   *  group flies to the capturer's pile. Lay-downs simply fly to their slot. */
+  _animatePlay(prev, state, lp) {
+    const S = this.css;
+    const seat = lp.seat;
+    const me = this.mySeat >= 0 ? this.mySeat : 0;
+    const color = this._seatColor(seat);
+    const card = lp.card;
+    // Where the card flies FROM: my hand (bottom) or the opponent fan (top).
+    const from = seat === me
+      ? { x: S * 0.5, y: S * (HAND_Y + 0.04) }
+      : { x: S * 0.5, y: S * OPP_CY };
+
+    // Lay-down: glide the card to its new spot on the table, then it stays.
+    if (lp.placed) {
+      const slot = this._tableLayout(state.table || [], S).find((p) => key(p.card) === key(card));
+      if (!slot) return;
+      this._flyCards.push({
+        card, fx: from.x, fy: from.y, tx: slot.x + slot.w / 2, ty: slot.y + slot.h / 2,
+        t0: now(), dur: FLY_MS, w: slot.w, h: slot.h, faceDown: false,
+        kind: 'layin', accent: color, arcH: S * 0.05,
+      });
+      return;
+    }
+
+    // Capture: where the swept cards were sitting (use the PREVIOUS table).
+    const prevLayout = this._tableLayout(prev.table || [], S);
+    const capSlots = (lp.captured || []).map((c) => {
+      const s = prevLayout.find((p) => key(p.card) === key(c));
+      const w = s ? s.w : S * 0.108, h = s ? s.h : S * 0.151;
+      const x = s ? s.x : S * 0.5 - w / 2, y = s ? s.y : S * TABLE_CY - h / 2;
+      return { card: c, x, y, w, h };
+    });
+    // The played card lands just above the centroid of what it grabs.
+    const n = Math.max(1, capSlots.length);
+    const cx = capSlots.reduce((a, g) => a + g.x + g.w / 2, 0) / n;
+    const cy = capSlots.reduce((a, g) => a + g.y + g.h / 2, 0) / n;
+    const pw = S * 0.108, ph = pw * 1.4;
+    const playSlot = { card, x: cx - pw / 2, y: cy - ph / 2 - S * 0.02, w: pw, h: ph };
+
+    const tArrive = now();
+    const tLand = tArrive + FLY_MS;        // played card has reached the table
+    const tFly = tLand + CAP_HOLD_MS;      // group lifts off toward the pile
+
+    // 1) played card flies in (face up)
+    this._flyCards.push({
+      card, fx: from.x, fy: from.y, tx: playSlot.x + playSlot.w / 2, ty: playSlot.y + playSlot.h / 2,
+      t0: tArrive, dur: FLY_MS, w: playSlot.w, h: playSlot.h, faceDown: false,
+      kind: 'playin', accent: color, arcH: S * 0.06,
+    });
+    // 2) hold: swept cards are shown immediately; the played card joins once landed
+    const holdCards = capSlots.map((g) => ({ ...g, appearAt: 0 }));
+    holdCards.push({ ...playSlot, appearAt: tLand });
+    this._captureHold = { until: tFly, seat, color, cards: holdCards };
+    // 3) the whole group flies to the pile
+    const target = this._pilePos(seat, S);
+    [playSlot, ...capSlots].forEach((g, idx) => {
+      this._flyCards.push({
+        card: g.card, fx: g.x + g.w / 2, fy: g.y + g.h / 2, tx: target.x, ty: target.y,
+        t0: tFly + idx * 40, dur: FLY_MS, w: S * 0.10, h: S * 0.14,
+        faceDown: false, accent: color, kind: 'capture', pileSeat: seat, arcH: S * 0.05,
+      });
+    });
+  }
+
   _detectSur(prev, state) {
     for (let s = 0; s < 2; s++) {
       if ((state.surs?.[s] ?? 0) > (prev.surs?.[s] ?? 0)) {
@@ -333,8 +411,11 @@ export class PasurRenderer {
   _tick() {
     const t = now();
     this._flyCards = this._flyCards.filter((f) => t < f.t0 + f.dur);
-    // recompute which deal cards are still in flight (to skip in the static layer)
-    this._dealKeys = new Set(this._flyCards.filter((f) => f.kind === 'deal' && f.card).map((f) => key(f.card)));
+    // recompute which cards are still flying TO the table (deal or lay-down),
+    // so the static layer doesn't draw them in place while they're mid-air.
+    this._dealKeys = new Set(this._flyCards
+      .filter((f) => (f.kind === 'deal' || f.kind === 'layin') && f.card)
+      .map((f) => key(f.card)));
     this._oppFlyCount = this._flyCards.filter((f) => f.kind === 'deal-opp').length;
   }
   _pileFlying(seat) { return this._flyCards.filter((f) => f.kind === 'capture' && f.pileSeat === seat && now() < f.t0 + f.dur).length; }
@@ -501,6 +582,27 @@ export class PasurRenderer {
       this._rr(x, y0, cw, ch, cw * 0.14); ctx.strokeStyle = 'rgba(255,255,255,.3)';
       ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.stroke(); ctx.restore();
     }
+    // سور marks — a fan of tilted (کج) gold cards tucked by the pile, one per
+    // سور, so the count is readable at a glance.
+    if (surs > 0) {
+      const sw = S * 0.032, sh = sw * 1.42;
+      const fx0 = x + cw * 0.72, fy0 = y0 + bandH * 0.32;
+      const shown = Math.min(surs, 6);
+      for (let i = 0; i < shown; i++) {
+        ctx.save();
+        ctx.translate(fx0 + i * sw * 0.62 + sw / 2, fy0 + sh / 2 + i * S * 0.004);
+        ctx.rotate(0.26 + i * 0.04);     // کج
+        this._rr(-sw / 2, -sh / 2, sw, sh, sw * 0.16);
+        ctx.fillStyle = '#2a2208'; ctx.fill();
+        ctx.shadowColor = GOLD; ctx.shadowBlur = 6;
+        ctx.strokeStyle = GOLD; ctx.lineWidth = 1.4; ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = GOLD; ctx.font = `${sh * 0.46}px serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('✦', 0, 0);
+        ctx.restore();
+      }
+    }
     // club + sur mini-stats under the pile
     const sy = y0 + bandH + S * 0.018;
     ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = `${S * 0.02}px sans-serif`;
@@ -660,7 +762,10 @@ export class PasurRenderer {
     const ch = this._captureHold;
     if (!ch || now() >= ch.until) return;
     const pulse = 0.5 + 0.5 * Math.sin(now() / 150);
-    for (const g of ch.cards) {
+    const t = now();
+    const shown = ch.cards.filter((g) => !g.appearAt || t >= g.appearAt);
+    if (!shown.length) return;
+    for (const g of shown) {
       this._cardFace(ctx, g.x, g.y, g.w, g.h, g.card, false);
       ctx.save();
       ctx.shadowColor = ch.color; ctx.shadowBlur = 10 + 10 * pulse;
@@ -668,8 +773,8 @@ export class PasurRenderer {
       ctx.restore();
     }
     // little "who took it" tag above the held cards
-    const top = ch.cards.reduce((m, g) => Math.min(m, g.y), Infinity);
-    const cx = ch.cards.reduce((s, g) => s + g.x + g.w / 2, 0) / ch.cards.length;
+    const top = shown.reduce((m, g) => Math.min(m, g.y), Infinity);
+    const cx = shown.reduce((s, g) => s + g.x + g.w / 2, 0) / shown.length;
     const label = ch.seat === this.mySeat ? 'تو برداشتی' : 'حریف برداشت';
     ctx.save();
     ctx.globalAlpha = 0.6 + 0.4 * pulse;
