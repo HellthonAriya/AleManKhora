@@ -4,7 +4,7 @@
      1) lays out every card each player captured,
      2) sweeps through them counting clubs (♣ خاج) → most-clubs bonus,
      3) sweeps again counting points card-by-card (آس/سرباز/۱۰ خشت/۲ خاج),
-        then adds سور and most-cards bonuses,
+        then adds the سور bonus,
      4) shows the round totals and animates the running match score → target.
    Driven by the `roundResult` payload the engine puts in the game state.
    ========================================================================= */
@@ -254,7 +254,6 @@ export function showPasurReveal(rr, opts = {}) {
     box.innerHTML = '';
     const add = (txt) => { const b = document.createElement('span'); b.className = 'pr-badge'; b.textContent = txt; box.appendChild(b); };
     if (bd.surs > 0) add(`سور ×${fa(bd.surs)} = +${fa(bd.surs * 5)}`);
-    if (bd.mostCards) add('بیشترین برگ +۷');
     if (bd.mostClubs) add('بیشترین خاج +۷');
     if (bd.tenD) add('۱۰ خشت +۳');
     if (bd.twoC) add('۲ خاج +۲');

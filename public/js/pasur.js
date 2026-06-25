@@ -33,12 +33,11 @@
  *    each Ace …… 1      each Jack …… 1
  *    10♦ …… 3          2♣ …… 2
  *    each سور …… 5
- *    most cards (>26) …… 7      most clubs (≥7) …… 7
+ *    most clubs (≥7) …… 7
  *  Higher total wins; equal totals are a draw.
  */
 
 const SUR_POINTS = 5;
-const MOST_CARDS_POINTS = 7;
 const MOST_CLUBS_POINTS = 7;
 
 /** Fishing value for the sum-to-11 rule, or null for picture cards (J/Q/K). */
@@ -355,16 +354,14 @@ export class PasurGame {
       }
       const clubs = pile.filter((c) => c.s === 3).length;
       return { aces, jacks, tenD, twoC, surs: this.surs[s], cards: pile.length, clubs,
-               mostCards: false, mostClubs: false, total: 0 };
+               mostClubs: false, total: 0 };
     });
-    // Majorities (all 52 cards captured by round end, so "most" = strict lead).
-    if (bd[0].cards > bd[1].cards) bd[0].mostCards = true;
-    else if (bd[1].cards > bd[0].cards) bd[1].mostCards = true;
+    // Only «most clubs» scores a majority bonus (≥7 of the 13 clubs = strict lead).
     if (bd[0].clubs > bd[1].clubs) bd[0].mostClubs = true;
     else if (bd[1].clubs > bd[0].clubs) bd[1].mostClubs = true;
     for (const b of bd) {
       b.total = b.aces + b.jacks + b.tenD * 3 + b.twoC * 2 + b.surs * SUR_POINTS
-              + (b.mostCards ? MOST_CARDS_POINTS : 0) + (b.mostClubs ? MOST_CLUBS_POINTS : 0);
+              + (b.mostClubs ? MOST_CLUBS_POINTS : 0);
     }
     return bd;
   }
