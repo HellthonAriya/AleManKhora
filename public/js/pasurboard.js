@@ -73,6 +73,11 @@ export class PasurRenderer {
     this._flashKeys = new Set();
     this._captureHold = null;  // { until, seat, color, cards:[{card,x,y,w,h,appearAt}] }
     this._shownPlayId = 0;     // id of the last play we've already animated
+    // While a play animation is running we are "busy": the next state is held
+    // back (so moves don't pile up mid-animation) and input is locked.
+    this._playAnimUntil = 0;   // timestamp the current play animation finishes
+    this._pendingState = null; // a newer state waiting for the animation to end
+    this._wantInteractive = false; // interactivity requested while we were busy
     this._dealKeys = new Set();    // keys of cards mid-deal (skip in static layer)
     this._oppFlyCount = 0;         // face-down deal cards heading to opponent
     this._raf = null;
@@ -83,7 +88,7 @@ export class PasurRenderer {
     this._resize();
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
-    this._onVis = () => { if (document.visibilityState === 'visible') { this._flyCards = []; this._particles = []; this._ensureAnim(); this.draw(); } };
+    this._onVis = () => { if (document.visibilityState === 'visible') { this._flyCards = []; this._particles = []; this._playAnimUntil = 0; this._ensureAnim(); this.draw(); } };
     document.addEventListener('visibilitychange', this._onVis);
   }
   destroy() {
@@ -94,14 +99,34 @@ export class PasurRenderer {
 
   setConfig(config) { this.config = { ...this.config, ...config }; this.draw(); }
   setMySeat(seat) { this.mySeat = seat; this.draw(); }
+  /** True while the most recent play's animation is still running. */
+  _busy() { return now() < this._playAnimUntil; }
+
   setInteractive(v) {
+    this._wantInteractive = v;
+    // Enabling input mid-animation is what lets a move land on top of the
+    // previous one — defer it until the animation has finished. Disabling is
+    // always applied at once.
+    if (v && this._busy()) { this._ensureAnim(); return; }
+    this._applyInteractive(v);
+  }
+  _applyInteractive(v) {
     this.interactive = v;
     this.canvas.style.cursor = v ? 'pointer' : 'default';
     if (!v) { this.staged = null; this.sel.clear(); }
     this._ensureAnim();
     this.draw();
   }
+
   setState(state) {
+    // Hold a new state until the running animation ends, so the AI's reply
+    // can't render (and animate) on top of the capture we're still showing.
+    if (this._busy()) { this._pendingState = state; this._ensureAnim(); return; }
+    this._ingestState(state);
+    this._ensureAnim();
+    this.draw();
+  }
+  _ingestState(state) {
     const prev = this.state;
     this.state = state;
     try { this.engine = PasurGame.fromState(state); } catch { this.engine = null; }
@@ -125,8 +150,18 @@ export class PasurRenderer {
     // A fresh state means my staged selection is stale.
     this.staged = null; this.sel.clear(); this.hover = -1;
     this._init = true;
-    this._ensureAnim();
-    this.draw();
+  }
+
+  /** Once the animation finishes: apply the queued state (which may start its
+   *  own animation), else honour any interactivity that was deferred. */
+  _drainQueue() {
+    if (this._busy()) return;
+    if (this._pendingState != null) {
+      const s = this._pendingState; this._pendingState = null;
+      this._ingestState(s);
+      return; // ingest may have started a new animation — re-check next frame
+    }
+    if (this._wantInteractive !== this.interactive) this._applyInteractive(this._wantInteractive);
   }
   _seatColor(s) { return this.config.colors?.[s] || ['#e7503a', '#3d7fe0'][s] || '#ccc'; }
 
@@ -186,6 +221,7 @@ export class PasurRenderer {
         t0: now(), dur: FLY_MS, w: slot.w, h: slot.h, faceDown: false,
         kind: 'layin', accent: color, arcH: S * 0.05,
       });
+      this._playAnimUntil = now() + FLY_MS + 120;   // lock input until it lands
       return;
     }
 
@@ -224,13 +260,16 @@ export class PasurRenderer {
     this._captureHold = { until: tFly, seat, color, cards: holdCards };
     // 3) the whole group flies to the pile
     const target = this._pilePos(seat, S);
-    [playSlot, ...capSlots].forEach((g, idx) => {
+    const group = [playSlot, ...capSlots];
+    group.forEach((g, idx) => {
       this._flyCards.push({
         card: g.card, fx: g.x + g.w / 2, fy: g.y + g.h / 2, tx: target.x, ty: target.y,
         t0: tFly + idx * 40, dur: FLY_MS, w: S * 0.10, h: S * 0.14,
         faceDown: false, accent: color, kind: 'capture', pileSeat: seat, arcH: S * 0.05,
       });
     });
+    // Lock input / queue the next state until the last card reaches the pile.
+    this._playAnimUntil = tFly + (group.length - 1) * 40 + FLY_MS + 120;
   }
 
   _detectSur(prev, state) {
@@ -337,7 +376,7 @@ export class PasurRenderer {
     if (i !== this.hover) { this.hover = i; this.draw(); }
   }
   _onClick(e) {
-    if (!this.interactive || !this.state) return;
+    if (!this.interactive || !this.state || this._busy()) return;
     const { mx, my } = this._pos(e);
 
     for (const b of this.buttons) {
@@ -398,11 +437,14 @@ export class PasurRenderer {
   _ensureAnim() {
     if (this._raf) cancelAnimationFrame(this._raf);
     this._raf = null;
-    const step = () => { this._raf = null; this.draw(); if (this._active()) this._raf = requestAnimationFrame(step); };
+    const step = () => { this._raf = null; this._drainQueue(); this.draw(); if (this._active()) this._raf = requestAnimationFrame(step); };
     if (this._active()) this._raf = requestAnimationFrame(step);
   }
   _active() {
     const t = now();
+    if (t < this._playAnimUntil) return true;                 // a play is animating
+    if (this._pendingState != null) return true;              // a state is queued
+    if (this._wantInteractive !== this.interactive) return true; // deferred input toggle
     if (this._flyCards.some((f) => t < f.t0 + f.dur)) return true;
     if (this._particles.length) return true;
     if (t < this._flashUntil) return true;
