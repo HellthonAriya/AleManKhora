@@ -197,12 +197,16 @@ export class PasurRenderer {
       const x = s ? s.x : S * 0.5 - w / 2, y = s ? s.y : S * TABLE_CY - h / 2;
       return { card: c, x, y, w, h };
     });
-    // The played card lands just above the centroid of what it grabs.
+    // The played card parks CLEAR of the swept cards (above them, or below if
+    // there's no room) so it never hides which cards we took.
     const n = Math.max(1, capSlots.length);
     const cx = capSlots.reduce((a, g) => a + g.x + g.w / 2, 0) / n;
-    const cy = capSlots.reduce((a, g) => a + g.y + g.h / 2, 0) / n;
-    const pw = S * 0.108, ph = pw * 1.4;
-    const playSlot = { card, x: cx - pw / 2, y: cy - ph / 2 - S * 0.02, w: pw, h: ph };
+    const topY = capSlots.reduce((a, g) => Math.min(a, g.y), Infinity);
+    const botY = capSlots.reduce((a, g) => Math.max(a, g.y + g.h), -Infinity);
+    const pw = S * 0.108, ph = pw * 1.4, gap = S * 0.016;
+    let py = topY - ph - gap;                       // prefer just above the group
+    if (py < S * 0.11) py = Math.min(botY + gap, S * 0.62 - ph); // else just below
+    const playSlot = { card, x: cx - pw / 2, y: py, w: pw, h: ph };
 
     const tArrive = now();
     const tLand = tArrive + FLY_MS;        // played card has reached the table
