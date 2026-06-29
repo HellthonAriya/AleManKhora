@@ -12,6 +12,7 @@ import { BOARD, GROUPS, GROUP_COLOR, MonopolyGame } from './monopoly.js';
 const FA = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
 const fa = (n) => String(n).replace(/\d/g, (d) => FA[+d]);
 const TOKENS = ['🎩', '🚗', '🐕', '🚢'];
+const TOKEN_KINDS = ['hat', 'car', 'dog', 'ship']; // hand-drawn vector tokens
 const GOLD = '#ffd76b', FELT = '#16472f', INK = '#16202a';
 
 const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
@@ -303,16 +304,38 @@ export class MonopolyRenderer {
     const isHotel = h === 5;
     const n = isHotel ? 1 : h;
     const span = horiz ? r.w : r.h;
-    const size = Math.min(bd * 0.7, span / 5);
-    const y0 = r.edge === 'bottom' ? r.y + bd * 0.15 : r.edge === 'top' ? r.y + r.h - bd + bd * 0.15 : 0;
+    const size = Math.min(bd * 0.5, span / (isHotel ? 3 : 5.5));
     for (let k = 0; k < n; k++) {
-      ctx.fillStyle = isHotel ? '#d63b3b' : '#2faa55';
       let cx, cy;
       if (horiz) { cx = r.x + span * ((k + 1) / (n + 1)); cy = (r.edge === 'bottom' ? r.y + bd * 0.5 : r.y + r.h - bd * 0.5); }
       else { cy = r.y + span * ((k + 1) / (n + 1)); cx = (r.edge === 'left' ? r.x + r.w - bd * 0.5 : r.x + bd * 0.5); }
-      ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
-      ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1; ctx.strokeRect(cx - size / 2, cy - size / 2, size, size);
+      if (isHotel) this._hotelIcon(ctx, cx, cy, size * 1.5);
+      else this._houseIcon(ctx, cx, cy, size);
     }
+  }
+  _houseIcon(ctx, cx, cy, s) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = s * 0.3; ctx.shadowOffsetY = s * 0.12;
+    ctx.fillStyle = '#2faa55'; this._rr(cx - s * 0.5, cy - s * 0.12, s, s * 0.62, s * 0.08); ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#1f7d3f';
+    ctx.beginPath(); ctx.moveTo(cx - s * 0.62, cy - s * 0.1); ctx.lineTo(cx, cy - s * 0.66); ctx.lineTo(cx + s * 0.62, cy - s * 0.1); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  _hotelIcon(ctx, cx, cy, s) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = s * 0.3; ctx.shadowOffsetY = s * 0.12;
+    ctx.fillStyle = '#d63b3b'; this._rr(cx - s * 0.55, cy - s * 0.55, s * 1.1, s * 1.15, s * 0.08); ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#a82a2a'; this._rr(cx - s * 0.62, cy - s * 0.68, s * 1.24, s * 0.18, s * 0.05); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    for (let row = 0; row < 2; row++) for (let col = 0; col < 2; col++) {
+      ctx.fillRect(cx - s * 0.3 + col * s * 0.42 - s * 0.07, cy - s * 0.28 + row * s * 0.42 - s * 0.07, s * 0.2, s * 0.24);
+    }
+    ctx.restore();
   }
 
   _drawCorner(i, r) {
@@ -352,19 +375,68 @@ export class MonopolyRenderer {
       const idx = group.indexOf(s);
       const off = (idx - (group.length - 1) / 2) * this.C * 0.28;
       const x = base.x + off, y = base.y + off * 0.4;
-      const rad = this.C * 0.26;
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 6;
-      ctx.fillStyle = this._seatColor(s);
-      ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.lineWidth = s === this.state.turn ? 3 : 1.5;
-      ctx.strokeStyle = s === this.state.turn ? GOLD : 'rgba(255,255,255,.85)';
-      ctx.stroke();
-      ctx.font = `${rad * 1.2}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(TOKENS[s] || (s + 1), x, y);
-      ctx.restore();
+      this._token(ctx, s, x, y, this.C * 0.27);
     }
+  }
+
+  /** A glossy game token: beveled colour disc + a white vector piece. */
+  _token(ctx, seat, x, y, r) {
+    const color = this._seatColor(seat);
+    const active = this.state.turn === seat;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = r * 0.5; ctx.shadowOffsetY = r * 0.14;
+    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.1, x, y, r);
+    g.addColorStop(0, this._shade(color, 0.45)); g.addColorStop(1, this._shade(color, -0.28));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    ctx.lineWidth = active ? r * 0.16 : r * 0.09;
+    ctx.strokeStyle = active ? GOLD : 'rgba(255,255,255,.92)';
+    ctx.beginPath(); ctx.arc(x, y, r * 0.9, 0, Math.PI * 2); ctx.stroke();
+    // top sheen
+    ctx.fillStyle = 'rgba(255,255,255,.22)';
+    ctx.beginPath(); ctx.ellipse(x, y - r * 0.42, r * 0.55, r * 0.26, 0, 0, Math.PI * 2); ctx.fill();
+    // vector piece
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = Math.max(1, r * 0.05); ctx.lineJoin = 'round';
+    this._tokenIcon(ctx, TOKEN_KINDS[seat] || 'hat', x, y, r * 0.6);
+    ctx.restore();
+  }
+  _tokenIcon(ctx, kind, cx, cy, s) {
+    const fillStroke = () => { ctx.fill(); ctx.stroke(); };
+    if (kind === 'hat') {
+      ctx.beginPath(); ctx.ellipse(cx, cy + s * 0.55, s * 0.95, s * 0.22, 0, 0, Math.PI * 2); fillStroke();
+      this._rr(cx - s * 0.5, cy - s * 0.72, s, s * 1.18, s * 0.12); fillStroke();
+    } else if (kind === 'car') {
+      this._rr(cx - s * 0.95, cy - s * 0.12, s * 1.9, s * 0.62, s * 0.2); fillStroke();
+      this._rr(cx - s * 0.42, cy - s * 0.58, s * 0.9, s * 0.5, s * 0.16); fillStroke();
+      ctx.beginPath(); ctx.arc(cx - s * 0.5, cy + s * 0.52, s * 0.27, 0, Math.PI * 2); fillStroke();
+      ctx.beginPath(); ctx.arc(cx + s * 0.5, cy + s * 0.52, s * 0.27, 0, Math.PI * 2); fillStroke();
+    } else if (kind === 'ship') {
+      ctx.beginPath(); ctx.moveTo(cx - s * 0.9, cy + s * 0.32); ctx.lineTo(cx + s * 0.9, cy + s * 0.32);
+      ctx.lineTo(cx + s * 0.55, cy + s * 0.78); ctx.lineTo(cx - s * 0.55, cy + s * 0.78); ctx.closePath(); fillStroke();
+      ctx.fillRect(cx - s * 0.05, cy - s * 0.95, s * 0.1, s * 1.25);
+      ctx.beginPath(); ctx.moveTo(cx + s * 0.12, cy - s * 0.9); ctx.lineTo(cx + s * 0.12, cy + s * 0.18); ctx.lineTo(cx + s * 0.82, cy + s * 0.18); ctx.closePath(); fillStroke();
+    } else { // dog (Scottie silhouette)
+      this._rr(cx - s * 0.85, cy - s * 0.12, s * 1.5, s * 0.72, s * 0.2); ctx.fill();
+      this._rr(cx + s * 0.28, cy - s * 0.72, s * 0.6, s * 0.72, s * 0.14); ctx.fill();
+      this._rr(cx + s * 0.68, cy - s * 0.46, s * 0.5, s * 0.32, s * 0.1); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(cx + s * 0.4, cy - s * 0.7); ctx.lineTo(cx + s * 0.56, cy - s * 1.08); ctx.lineTo(cx + s * 0.72, cy - s * 0.7); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(cx - s * 0.85, cy - s * 0.1); ctx.lineTo(cx - s * 1.08, cy - s * 0.52); ctx.lineTo(cx - s * 0.62, cy - s * 0.32); ctx.closePath(); ctx.fill();
+      ctx.fillRect(cx - s * 0.62, cy + s * 0.5, s * 0.22, s * 0.4);
+      ctx.fillRect(cx + s * 0.32, cy + s * 0.5, s * 0.22, s * 0.4);
+      ctx.stroke();
+    }
+  }
+  /** Lighten (amt>0) or darken (amt<0) a hex colour; returns an rgb() string. */
+  _shade(hex, amt) {
+    const m = (hex || '#888888').replace('#', '');
+    if (m.length < 6) return hex;
+    let r = parseInt(m.slice(0, 2), 16), g = parseInt(m.slice(2, 4), 16), b = parseInt(m.slice(4, 6), 16);
+    const f = amt < 0 ? 1 + amt : 1, add = amt > 0 ? amt * 255 : 0;
+    r = Math.max(0, Math.min(255, Math.round(r * f + add)));
+    g = Math.max(0, Math.min(255, Math.round(g * f + add)));
+    b = Math.max(0, Math.min(255, Math.round(b * f + add)));
+    return `rgb(${r},${g},${b})`;
   }
 
   /* ------------------------------- centre ------------------------------- */
