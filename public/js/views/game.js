@@ -60,6 +60,8 @@ export function GameView(roomId) {
   let pasurRevealHandle = null; // open Pasur reveal overlay, if any
   let hokmShownHand = 0;      // last Hokm hand whose result popup we showed
   let hokmHandModal = null;   // open Hokm between-hands result popup, if any
+  let bgShownGame = 0;        // last Backgammon game whose result popup we showed
+  let bgGameModal = null;     // open Backgammon between-games result popup, if any
   let pendingOver = null;     // game-over payload deferred until a reveal finishes
 
   // local clock model
@@ -842,8 +844,9 @@ export function GameView(roomId) {
     'game:start': (v) => {
       rematchPending = false; seriesPending = false; myPrediction = null;
       pasurShownRound = 0; pendingOver = null;
-      hokmShownHand = 0;
+      hokmShownHand = 0; bgShownGame = 0;
       if (hokmHandModal) { hokmHandModal.close?.(); hokmHandModal = null; }
+      if (bgGameModal) { bgGameModal.close?.(); bgGameModal = null; }
       if (pasurRevealHandle) { pasurRevealHandle.close?.(); pasurRevealHandle = null; }
       if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
       applyView(v);
@@ -870,6 +873,7 @@ export function GameView(roomId) {
       // play the FINAL reveal (with the result), not a stray «دست بعد» one.
       if (!gameIsOver() && maybePasurReveal(s, false)) return;
       maybeHokmHandEnd(s);
+      maybeBackgammonGameEnd(s);
       if (status === 'active' && !gameIsOver()) playSound(isMyTurnActive() ? 'turn' : 'move');
     },
     'game:clock': (cv) => { setClock(cv); },
@@ -981,6 +985,29 @@ export function GameView(roomId) {
       body,
       actions: [{ label: 'دست بعد ▶', class: 'btn-primary', onClick: () => { if (!spectator) socket.emit('hokm:nextHand'); } }],
       onClose: () => { hokmHandModal = null; },
+    });
+  }
+
+  /** Backgammon match mode: between-games result popup with «بازی بعد». */
+  function maybeBackgammonGameEnd(s) {
+    if (gameType !== 'backgammon') return;
+    if (s.phase !== 'game-end') { if (bgGameModal) { bgGameModal.close?.(); bgGameModal = null; } return; }
+    if (!s.gameResult || s.gameResult.gameNumber <= bgShownGame) return;
+    bgShownGame = s.gameResult.gameNumber;
+    if (bgGameModal) { bgGameModal.close?.(); bgGameModal = null; }
+    const gr = s.gameResult, me = seat < 0 ? 0 : seat;
+    const iWon = gr.winner === me;
+    const kindLabel = gr.kind === 'backgammon' ? `توله (مارسِ کامل) — ${faNum(3)} امتیاز`
+      : gr.kind === 'gammon' ? `مارس — ${faNum(2)} امتیاز` : `برد ساده — ${faNum(1)} امتیاز`;
+    const body = h('div', { class: 'center' },
+      h('div', { style: 'font-size:1.3rem;font-weight:800;margin-bottom:6px' }, `بازیِ ${faNum(gr.gameNumber)} — ${iWon ? 'تو بردی' : 'حریف برد'}`),
+      h('div', { style: 'color:var(--accent);font-weight:700;margin-bottom:8px' }, kindLabel),
+      h('div', { class: 'faint' }, `مسابقه: تو ${faNum(gr.matchScores[me])} — حریف ${faNum(gr.matchScores[1 - me])} (تا ${faNum(gr.matchTarget)})`));
+    bgGameModal = modal({
+      title: '🎲 پایان بازی',
+      body,
+      actions: [{ label: 'بازی بعد ▶', class: 'btn-primary', onClick: () => { if (!spectator) socket.emit('backgammon:nextGame'); } }],
+      onClose: () => { bgGameModal = null; },
     });
   }
 
@@ -1222,6 +1249,7 @@ export function GameView(roomId) {
     renderer?.destroy?.();
     if (pasurRevealHandle) { pasurRevealHandle.dismiss?.(); pasurRevealHandle = null; }
     if (hokmHandModal) { hokmHandModal.close?.(); hokmHandModal = null; }
+    if (bgGameModal) { bgGameModal.close?.(); bgGameModal = null; }
     voice.destroy();
     socket.emit('room:leave');
   });

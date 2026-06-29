@@ -57,6 +57,16 @@ export class BackgammonGame {
     this.moveCount = 0;
     this.eliminated = [false, false];
 
+    // Match layer: a match is several games to `matchTarget` points. A win is
+    // worth 1 (single), 2 (gammon / مارس), or 3 (backgammon / توله). Single-game
+    // mode ends after one game.
+    this.phase = 'play';
+    this.singleGame = !!opts.singleGame;
+    this.matchTarget = Number(opts.matchTarget) > 0 ? Number(opts.matchTarget) : 7;
+    this.matchScores = [0, 0];
+    this.gameNumber = 1;
+    this.gameResult = null;
+
     // points[i] = { seat, count }
     this.points = [];
     for (let i = 0; i < NUM_POINTS; i++) this.points.push({ seat: null, count: 0 });
@@ -307,9 +317,7 @@ export class BackgammonGame {
 
     // Win check.
     if (this.off[seat] === CHECKERS) {
-      this.winner = seat;
-      this.endReason = this.off[other(seat)] === 0 ? 'gammon' : 'single';
-      this.dice = [];
+      this._endGame(seat);
       return { state: this.toState(), winner: this.winner };
     }
 
@@ -332,6 +340,55 @@ export class BackgammonGame {
     this.dice = r.dice;
   }
 
+  /** Points the finished game is worth: 1 single, 2 gammon (loser bore off
+   *  none), 3 backgammon (loser bore off none AND has a checker on the bar or
+   *  still in the winner's home board). */
+  _gamePoints(winner) {
+    const loser = other(winner);
+    if (this.off[loser] > 0) return 1;
+    let inWinnerHome = false;
+    const home = winner === 0 ? [0, 5] : [18, 23];
+    for (let i = home[0]; i <= home[1]; i++) if (this.points[i].seat === loser && this.points[i].count > 0) inWinnerHome = true;
+    if (this.bar[loser] > 0 || inWinnerHome) return 3;
+    return 2;
+  }
+
+  /** Score the finished game, update the match, and either finish the match or
+   *  pause at 'game-end' for the next game. */
+  _endGame(winner) {
+    const points = this._gamePoints(winner);
+    const kind = points === 3 ? 'backgammon' : points === 2 ? 'gammon' : 'single';
+    this.matchScores[winner] += points;
+    this.dice = [];
+    this.gameResult = {
+      gameNumber: this.gameNumber, winner, points, kind,
+      matchScores: this.matchScores.slice(), matchTarget: this.matchTarget,
+    };
+    if (this.singleGame || this.matchScores[winner] >= this.matchTarget) {
+      this.winner = winner;
+      this.endReason = kind;
+    } else {
+      this.phase = 'game-end';
+    }
+  }
+
+  /** Start the next game of a match (alternating opener). */
+  nextGame() {
+    if (this.phase !== 'game-end' || this.isOver()) return false;
+    this.gameNumber++;
+    this.gameResult = null;
+    this.phase = 'play';
+    this.points = [];
+    for (let i = 0; i < NUM_POINTS; i++) this.points.push({ seat: null, count: 0 });
+    this.bar = [0, 0]; this.off = [0, 0];
+    this._setupStart();
+    this.turn = (this.gameNumber - 1) % 2;   // alternate who opens each game
+    const r = rollDice();
+    this.rolled = r.rolled;
+    this.dice = r.dice;
+    return true;
+  }
+
   toState() {
     return {
       gameType: 'backgammon',
@@ -346,6 +403,12 @@ export class BackgammonGame {
       endReason: this.endReason,
       eliminated: this.eliminated.slice(),
       moveCount: this.moveCount,
+      phase: this.phase,
+      singleGame: this.singleGame,
+      matchTarget: this.matchTarget,
+      matchScores: this.matchScores.slice(),
+      gameNumber: this.gameNumber,
+      gameResult: this.gameResult ? { ...this.gameResult, matchScores: this.gameResult.matchScores.slice() } : null,
     };
   }
 
@@ -370,6 +433,12 @@ export class BackgammonGame {
     g.endReason = state.endReason === undefined ? null : state.endReason;
     g.eliminated = Array.isArray(state.eliminated) ? state.eliminated.slice() : [false, false];
     g.moveCount = state.moveCount || 0;
+    g.phase = state.phase || 'play';
+    g.singleGame = !!state.singleGame;
+    g.matchTarget = state.matchTarget || 7;
+    g.matchScores = Array.isArray(state.matchScores) ? state.matchScores.slice() : [0, 0];
+    g.gameNumber = state.gameNumber || 1;
+    g.gameResult = state.gameResult ? { ...state.gameResult } : null;
     return g;
   }
 }

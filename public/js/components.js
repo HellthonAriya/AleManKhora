@@ -515,7 +515,8 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     mode: 'match',                  // pasur: 'match' (to 62) | 'single' (one hand)
     players: 2,                     // tic-tac-toe: 2–4
     ttSymbols: ['✕', '◯', '▲', '◆'], // tic-tac-toe per-seat marks
-    firstPlayer: 'me',              // tic-tac-toe: 'me' | 'opponent' | 'random'
+    firstPlayer: 'me',              // tic-tac-toe/gomoku/dots first move
+    matchLength: 'single',          // backgammon: 'single' | '3' | '5' | '7'
   };
 
   const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
@@ -603,6 +604,14 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     ], (v) => { cfg.firstPlayer = v; })));
   }
 
+  /* --- backgammon: match length (with مارس/توله scoring) --- */
+  if (gameType === 'backgammon') {
+    firstMount.append(optGroup('طول مسابقه', seg([
+      { label: 'تک‌بازی', value: 'single', active: true },
+      { label: '۳ امتیازی', value: '3' }, { label: '۵ امتیازی', value: '5' }, { label: '۷ امتیازی', value: '7' },
+    ], (v) => { cfg.matchLength = v; })));
+  }
+
   /* --- piece colours --- */
   const colorsMount = h('div', {});
   function colorPick(idx) {
@@ -673,6 +682,7 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
         out.firstTurn = cfg.firstPlayer === 'me' ? 0 : cfg.firstPlayer === 'opponent' ? 1 : 'random';
       }
       if (gameType === 'pasur') out.mode = cfg.mode;
+      if (gameType === 'backgammon') out.matchLength = cfg.matchLength;
       if (gameType === 'tictactoe') {
         out.size = cfg.size; out.players = cfg.players;
         out.ttSymbols = cfg.ttSymbols.slice(0, cfg.players);

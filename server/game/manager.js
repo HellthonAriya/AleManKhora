@@ -44,7 +44,7 @@ function buildEngine(gameType, config) {
     case 'gomoku': return new GomokuGame({ size: config.size || 15, firstTurn: config.firstTurn });
     case 'othello': return new OthelloGame();
     case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5, firstTurn: config.firstTurn });
-    case 'backgammon': return new BackgammonGame();
+    case 'backgammon': return new BackgammonGame({ singleGame: config.singleGame, matchTarget: config.matchTarget });
     case 'hokm': return new HokmGame({ variant: config.variant, singleHand: config.singleHand, handsTarget: config.handsTarget });
     case 'pasur': return new PasurGame({ singleRound: config.singleRound });
     case 'monopoly': return new MonopolyGame({
@@ -112,6 +112,12 @@ function sanitizeSimpleConfig(cfg, gameType) {
   }
   if (gameType === 'gomoku' || gameType === 'dots') {
     out.firstTurn = cfg.firstTurn === 'random' ? 'random' : ([0, 1].includes(parseInt(cfg.firstTurn, 10)) ? parseInt(cfg.firstTurn, 10) : 0);
+  }
+  if (gameType === 'backgammon') {
+    const ml = ['single', '3', '5', '7'].includes(String(cfg.matchLength)) ? String(cfg.matchLength) : 'single';
+    out.matchLength = ml;
+    out.singleGame = ml === 'single';
+    out.matchTarget = ml === 'single' ? 1 : parseInt(ml, 10);
   }
   if (gameType === 'tictactoe') {
     const players = [2, 3, 4].includes(parseInt(cfg.players, 10)) ? parseInt(cfg.players, 10) : 2;
@@ -756,6 +762,8 @@ export class GameManager {
       this._pasurRoundEnd(room);
     } else if (room.gameType === 'hokm' && room.game.phase === 'hand-end') {
       this._hokmHandEnd(room);
+    } else if (room.gameType === 'backgammon' && room.game.phase === 'game-end') {
+      this._backgammonGameEnd(room);
     } else {
       this.scheduleFlag(room);
       this.resetIdleTimer(room);
@@ -772,6 +780,32 @@ export class GameManager {
     this.clearIdleTimer(room);
     if (room._hokmAdvance) clearTimeout(room._hokmAdvance);
     room._hokmAdvance = setTimeout(() => this.advanceHokmHand(room), 30000);
+  }
+
+  /** A Backgammon game just ended inside a match. Freeze for the result; the
+   *  client advances via `backgammon:nextGame`, with a server safety timeout. */
+  _backgammonGameEnd(room) {
+    if (room.clock?.timer) { clearTimeout(room.clock.timer); room.clock.timer = null; }
+    this.clearIdleTimer(room);
+    if (room._bgAdvance) clearTimeout(room._bgAdvance);
+    room._bgAdvance = setTimeout(() => this.advanceBackgammonGame(room), 30000);
+  }
+
+  /** Start the next game of a Backgammon match after the result display. */
+  advanceBackgammonGame(room) {
+    if (!room || room.status !== 'active' || room.gameType !== 'backgammon') return;
+    if (room.game.phase !== 'game-end') return;
+    if (room._bgAdvance) { clearTimeout(room._bgAdvance); room._bgAdvance = null; }
+    if (!room.game.nextGame()) return;
+    room.lastActivity = Date.now();
+    room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
+    this.startClock(room);
+    this.resetIdleTimer(room);
+    this.emitPerSeat(room, 'game:update', (s) => ({
+      state: room.stateFor(s), turn: room.game.turn, gameStart: true,
+    }));
+    this.broadcast(room, 'game:clock', room.clockView());
+    this.maybeRunAI(room);
   }
 
   /** Deal the next Hokm hand after the between-hands result. */

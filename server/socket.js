@@ -265,6 +265,14 @@ export function registerSocket(io, manager) {
       cb?.({ ok: true });
     });
 
+    socket.on('backgammon:nextGame', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room || room.gameType !== 'backgammon' || room.game?.phase !== 'game-end') return cb?.({ ok: false });
+      if (room.seatOf(socket.id) < 0) return cb?.({ ok: false });
+      manager.advanceBackgammonGame(room);
+      cb?.({ ok: true });
+    });
+
     /* ------------------------------ Rematch ------------------------------ */
     socket.on('game:rematch', (cb) => {
       const room = manager.getRoom(socket.data.roomId);
