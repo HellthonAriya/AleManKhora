@@ -530,8 +530,9 @@ export class HokmRenderer {
   _drawMyHand(ctx, S, st, CW, CH) {
     const cards = st.hands?.[this.mySeat];
     if (!cards || !cards.length) return;
-    // No one sees their cards until trump is chosen and play begins
-    const hideCards = st.phase === 'choose-trump';
+    // During trump selection only the HAKEM sees their (5) cards — to choose
+    // the trump from them; everyone else still sees card backs.
+    const hideCards = st.phase === 'choose-trump' && st.hakem !== this.mySeat;
     const sorted  = [...cards].sort((a, b) => (SUIT_SORT[a.s] - SUIT_SORT[b.s]) || (b.r - a.r));
     const legal   = this._legalCards();
     const maxSpan = S * 0.88;

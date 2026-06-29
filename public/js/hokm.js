@@ -65,18 +65,15 @@ export class HokmGame {
     this.numPlayers = Number(this.variant);
     this.teams = this.variant === '4';
 
-    // Deck & deal.
+    // Deck & deal. Authentic Hokm: the hakem is dealt 5 cards FIRST and chooses
+    // the trump from them; the rest of the cards are dealt only afterwards.
+    this.perHand = this.variant === '4' ? 13 : this.variant === '3' ? 17 : 26;
     const deck = shuffle(buildDeck(this.variant === '3'));
-    const perHand = this.variant === '4' ? 13 : this.variant === '3' ? 17 : 26;
-    this.hands = range(this.numPlayers).map(() => []);
-    let idx = 0;
-    for (let n = 0; n < perHand; n++) {
-      for (let p = 0; p < this.numPlayers; p++) {
-        this.hands[p].push(deck[idx++]);
-      }
-    }
-
     this.hakem = Math.floor(Math.random() * this.numPlayers);
+    this.hands = range(this.numPlayers).map(() => []);
+    for (let n = 0; n < 5; n++) this.hands[this.hakem].push(deck[n]);
+    this.deck = deck.slice(5);   // remaining cards, dealt once trump is chosen
+
     this.phase = 'choose-trump';
     this.turn = this.hakem;
     this.trump = null;
@@ -109,6 +106,16 @@ export class HokmGame {
     this.hidden = true;
   }
 
+  /** Deal the remaining cards once the trump is set: fill the hakem up to a
+   *  full hand first, then each other player. */
+  _dealRest() {
+    let idx = 0;
+    const fill = (p) => { while (this.hands[p].length < this.perHand) this.hands[p].push(this.deck[idx++]); };
+    fill(this.hakem);
+    for (let p = 0; p < this.numPlayers; p++) if (p !== this.hakem) fill(p);
+    this.deck = [];
+  }
+
   // ---------------------------------------------------------------- state
 
   toState() {
@@ -130,6 +137,8 @@ export class HokmGame {
       trickNumber: this.trickNumber,
       hands: this.hands.map((h) => (h == null ? null : h.map((c) => ({ s: c.s, r: c.r })))),
       handCounts: this.hands.map((h) => (h == null ? 0 : h.length)),
+      perHand: this.perHand,
+      deck: this.deck ? this.deck.map((c) => ({ s: c.s, r: c.r })) : [],
       tricksWon: this.tricksWon.slice(),
       teamTricks: this.teamTricks ? this.teamTricks.slice() : null,
       winThreshold: this.winThreshold,
@@ -151,6 +160,7 @@ export class HokmGame {
       return null;
     });
     // handCounts stays full and correct (already set by toState()).
+    st.deck = null;   // never reveal the undealt cards
     return st;
   }
 
@@ -173,6 +183,8 @@ export class HokmGame {
     g.trickNumber = state.trickNumber || 0;
     g.hands = (state.hands || []).map((h) =>
       h == null ? null : h.map((c) => ({ s: c.s, r: c.r })));
+    g.perHand = state.perHand ?? (g.variant === '4' ? 13 : g.variant === '3' ? 17 : 26);
+    g.deck = (state.deck || []).map((c) => ({ s: c.s, r: c.r }));
     g.tricksWon = (state.tricksWon || []).slice();
     g.teamTricks = state.teamTricks ? state.teamTricks.slice() : null;
     g.winThreshold = state.winThreshold;
@@ -233,6 +245,7 @@ export class HokmGame {
       const suit = action.suit;
       if (!Number.isInteger(suit) || suit < 0 || suit > 3) throw new Error('invalid suit');
       this.trump = suit;
+      this._dealRest();          // now deal everyone the rest of their cards
       this.phase = 'play';
       this.turn = this.hakem;
       this.leader = this.hakem;
