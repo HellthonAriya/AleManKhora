@@ -1089,10 +1089,15 @@ export function GameView(roomId) {
     // Ranked scoreboard
     const order = players.map((p, s) => ({ s, p })).filter((x) => x.p)
       .sort((a, b) => (sv.scores[b.s] || 0) - (sv.scores[a.s] || 0));
+    const maxScore = order.length ? Math.max(...order.map((o) => sv.scores[o.s] || 0)) : 0;
+    const champs = order.filter((o) => (sv.scores[o.s] || 0) === maxScore);
+    const tied = champs.length > 1;
     const board = h('div', { class: 'series-scores', style: 'margin:12px 0' });
     order.forEach(({ s, p }, rank) => {
+      // A 🥇 goes to everyone sharing the top score (co-champions on a tie).
+      const isChamp = done && (sv.scores[s] || 0) === maxScore;
       board.append(h('div', { class: 'series-score-row' + (s === seat ? ' me' : '') },
-        h('span', {}, done && rank === 0 ? '🥇 ' : `${faNum(rank + 1)}. `),
+        h('span', {}, isChamp ? '🥇 ' : `${faNum(rank + 1)}. `),
         h('span', { class: 'dotc', style: `background:${seatColor(s)}` }),
         h('span', { class: 'series-name' }, p.name, p.isAI ? ' 🤖' : ''),
         h('span', { class: 'series-pts' }, faNum(sv.scores[s] ?? 0))));
@@ -1100,10 +1105,17 @@ export function GameView(roomId) {
 
     let title, footer;
     if (done) {
-      const champ = order[0];
       title = '🏆 پایان لیگ';
-      footer = h('p', { style: 'font-weight:700;color:var(--accent)' },
-        champ?.s === seat ? 'تو قهرمان لیگ شدی! 🎉' : `${champ?.p?.name || '—'} قهرمان لیگ شد.`);
+      if (tied) {
+        const iAmChamp = champs.some((c) => c.s === seat);
+        const names = champs.map((c) => c.p?.name || '—').join(' و ');
+        footer = h('p', { style: 'font-weight:700;color:var(--accent)' },
+          iAmChamp ? '🤝 امتیازها برابر شد — تو قهرمانِ مشترک شدی!' : `🤝 امتیازها برابر شد — قهرمانانِ مشترک: ${names}`);
+      } else {
+        const champ = champs[0];
+        footer = h('p', { style: 'font-weight:700;color:var(--accent)' },
+          champ?.s === seat ? 'تو قهرمان لیگ شدی! 🎉' : `${champ?.p?.name || '—'} قهرمان لیگ شد.`);
+      }
     } else {
       title = `پایان بازی ${faNum(sv.index + 1)} از ${faNum(sv.total)}`;
       const next = sv.games[sv.index + 1];
