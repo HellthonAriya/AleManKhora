@@ -83,6 +83,8 @@ export class PasurGame {
     this.teams = false;
 
     // A match is several full-deck rounds; first to `target` points wins.
+    // In single-round mode the match ends after one round (higher score wins).
+    this.singleRound = !!opts.singleRound;
     this.target = Number(opts.target) > 0 ? Number(opts.target) : 62;
     this.matchScores = [0, 0];   // cumulative points across rounds
     this.roundNumber = 1;
@@ -173,6 +175,7 @@ export class PasurGame {
       moveCount: this.moveCount,
       // Match (multi-round to `target` points)
       target: this.target,
+      singleRound: this.singleRound,
       matchScores: this.matchScores.slice(),
       roundNumber: this.roundNumber,
       dealer: this.dealer,
@@ -217,6 +220,7 @@ export class PasurGame {
     g.eliminated = (state.eliminated || [false, false]).slice();
     g.moveCount = state.moveCount;
     g.target = state.target ?? 62;
+    g.singleRound = !!state.singleRound;
     g.matchScores = (state.matchScores || [0, 0]).slice();
     g.roundNumber = state.roundNumber || 1;
     g.dealer = state.dealer ?? 1;
@@ -315,7 +319,13 @@ export class PasurGame {
       this.captured[seat].push(clone(card), ...captured);
       this.lastCapturer = seat;
       // سور: clearing the table scores a bonus — but NOT with a سرباز (Jack).
-      if (this.table.length === 0 && card.r !== 11) this.surs[seat]++;
+      // Both sides can't hold سورs at once: a new سور first CANCELS one of the
+      // opponent's سورs; only if they have none does it add to your own.
+      if (this.table.length === 0 && card.r !== 11) {
+        const opp = 1 - seat;
+        if (this.surs[opp] > 0) this.surs[opp]--;
+        else this.surs[seat]++;
+      }
     }
 
     // Record the play (public) for the client's capture animation.
@@ -387,7 +397,7 @@ export class PasurGame {
       matchAfter: this.matchScores.slice(),
       target: this.target,
     };
-    if (Math.max(this.matchScores[0], this.matchScores[1]) >= this.target) {
+    if (this.singleRound || Math.max(this.matchScores[0], this.matchScores[1]) >= this.target) {
       this._finishMatch();
     } else {
       this.phase = 'round-end';   // pause for the client scoring reveal

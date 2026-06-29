@@ -506,6 +506,7 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     size: gameType === 'gomoku' ? 15 : gameType === 'dots' ? 5 : 0,
     timeLimit: 0,
     timeIncrement: 0,
+    mode: 'match', // pasur: 'match' (to 62) | 'single' (one hand)
   };
 
   const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
@@ -583,7 +584,17 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     optGroup('پاداش زمانی هر حرکت', seg(INC_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeIncrement })),
       (v) => { cfg.timeIncrement = v; })));
 
+  /* --- pasur: single hand vs match to 62 --- */
+  const modeMount = h('div', {});
+  if (gameType === 'pasur') {
+    modeMount.append(optGroup('حالت بازی', seg([
+      { label: 'مسابقه تا ۶۲', value: 'match', active: true },
+      { label: 'تک‌دست', value: 'single' },
+    ], (v) => { cfg.mode = v; })));
+  }
+
   const leftCol = h('div', { style: 'flex:1.2' },
+    modeMount,
     sizeMount,
     optGroup('کنترل زمان (تایمر)', timeSeg),
     incMount,
@@ -604,6 +615,7 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
       const out = { gameType, colors: [...cfg.colors], timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement };
       if (gameType === 'gomoku') out.size = cfg.size;
       if (gameType === 'dots') { out.rows = cfg.size; out.cols = cfg.size; }
+      if (gameType === 'pasur') out.mode = cfg.mode;
       return out;
     },
   };

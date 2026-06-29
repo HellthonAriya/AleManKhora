@@ -46,7 +46,7 @@ function buildEngine(gameType, config) {
     case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5 });
     case 'backgammon': return new BackgammonGame();
     case 'hokm': return new HokmGame({ variant: config.variant });
-    case 'pasur': return new PasurGame();
+    case 'pasur': return new PasurGame({ singleRound: config.singleRound });
     case 'monopoly': return new MonopolyGame({
       players: config.players, maxTurns: config.maxTurns,
       startCash: config.startCash, goSalary: config.goSalary,
@@ -190,6 +190,7 @@ function sanitizePasurConfig(cfg) {
     gameType: 'pasur', players: 2, teams: false, colors,
     p0Color: colors[0], p1Color: colors[1],
     timeLimit, timeIncrement, ranked: false,
+    singleRound: cfg.mode === 'single' || !!cfg.singleRound,
   };
 }
 
