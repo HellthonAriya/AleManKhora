@@ -25,7 +25,7 @@ const DIRS = [
 export class GomokuGame {
   constructor(opts = {}) {
     this.numPlayers = 2;
-    this.turn = 0;
+    this.turn = opts.firstTurn === 'random' ? Math.floor(Math.random() * 2) : (Number(opts.firstTurn) === 1 ? 1 : 0);
     this.winner = null;
     this.draw = false;
     this.endReason = null;

@@ -41,9 +41,9 @@ function buildEngine(gameType, config) {
     case 'chess4': return new ChessGame({ variant: config.teams ? '4team' : '4' });
     case 'chesszade': return new ChessGame({ variant: '2', setup: randomChessSetup({ randomPawns: config.randomPawns, mirror: config.mirror }) });
     case 'tictactoe': return new TicTacToeGame({ size: config.size, players: config.players, firstTurn: config.firstTurn });
-    case 'gomoku': return new GomokuGame({ size: config.size || 15 });
+    case 'gomoku': return new GomokuGame({ size: config.size || 15, firstTurn: config.firstTurn });
     case 'othello': return new OthelloGame();
-    case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5 });
+    case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5, firstTurn: config.firstTurn });
     case 'backgammon': return new BackgammonGame();
     case 'hokm': return new HokmGame({ variant: config.variant, singleHand: config.singleHand, handsTarget: config.handsTarget });
     case 'pasur': return new PasurGame({ singleRound: config.singleRound });
@@ -109,6 +109,9 @@ function sanitizeSimpleConfig(cfg, gameType) {
   if (gameType === 'dots') {
     const n = DOTS_SIZES.includes(parseInt(cfg.rows, 10)) ? parseInt(cfg.rows, 10) : 5;
     out.rows = n; out.cols = n;
+  }
+  if (gameType === 'gomoku' || gameType === 'dots') {
+    out.firstTurn = cfg.firstTurn === 'random' ? 'random' : ([0, 1].includes(parseInt(cfg.firstTurn, 10)) ? parseInt(cfg.firstTurn, 10) : 0);
   }
   if (gameType === 'tictactoe') {
     const players = [2, 3, 4].includes(parseInt(cfg.players, 10)) ? parseInt(cfg.players, 10) : 2;

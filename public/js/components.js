@@ -595,6 +595,14 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     rebuildSyms();
   }
 
+  /* --- who moves first (games with a first-move advantage) --- */
+  const firstMount = h('div', {});
+  if (gameType === 'gomoku' || gameType === 'dots') {
+    firstMount.append(optGroup('نوبتِ اول', seg([
+      { label: 'اول من', value: 'me', active: true }, { label: 'اول حریف', value: 'opponent' }, { label: 'تصادفی', value: 'random' },
+    ], (v) => { cfg.firstPlayer = v; })));
+  }
+
   /* --- piece colours --- */
   const colorsMount = h('div', {});
   function colorPick(idx) {
@@ -640,6 +648,7 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     modeMount,
     sizeMount,
     ttMount,
+    firstMount,
     optGroup('کنترل زمان (تایمر)', timeSeg),
     incMount,
     colorsMount,
@@ -660,6 +669,9 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
       const out = { gameType, colors: [...cfg.colors], timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement };
       if (gameType === 'gomoku') out.size = cfg.size;
       if (gameType === 'dots') { out.rows = cfg.size; out.cols = cfg.size; }
+      if (gameType === 'gomoku' || gameType === 'dots') {
+        out.firstTurn = cfg.firstPlayer === 'me' ? 0 : cfg.firstPlayer === 'opponent' ? 1 : 'random';
+      }
       if (gameType === 'pasur') out.mode = cfg.mode;
       if (gameType === 'tictactoe') {
         out.size = cfg.size; out.players = cfg.players;
