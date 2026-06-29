@@ -69,12 +69,10 @@ export class BackgammonGame {
 
     if (!opts._blank) {
       this._setupStart();
-      // Roll for seat 0 to begin (auto-skip if no legal move, though impossible
-      // from the start position).
+      // Roll for seat 0 to begin.
       const r = rollDice();
       this.rolled = r.rolled;
       this.dice = r.dice;
-      this._autoSkipIfStuck();
     }
   }
 
@@ -257,7 +255,17 @@ export class BackgammonGame {
   apply(seat, action) {
     if (this.isOver()) throw new Error('game is over');
     if (seat !== this.turn) throw new Error('not your turn');
-    if (!action || action.type !== 'move') throw new Error('invalid action');
+    if (!action) throw new Error('invalid action');
+
+    // Pass: only legal when the rolled dice leave no playable move.
+    if (action.type === 'pass') {
+      if (this.legalMoves(seat).length > 0) throw new Error('you still have a move');
+      this.moveCount++;
+      this._advanceTurn();
+      return { state: this.toState(), winner: this.winner };
+    }
+
+    if (action.type !== 'move') throw new Error('invalid action');
 
     const { from, to } = action;
 
@@ -313,42 +321,15 @@ export class BackgammonGame {
     return { state: this.toState(), winner: this.winner };
   }
 
-  /** Pass turn to the other seat and roll for them, auto-skipping if stuck. */
+  /** Pass turn to the other seat and roll for them. If the rolled dice give the
+   *  new player NO legal move, we DON'T silently skip — the state is emitted so
+   *  the player (or bot) sees their roll, then they explicitly `pass` (the
+   *  client auto-passes after a short pause). */
   _advanceTurn() {
     this.turn = other(this.turn);
     const r = rollDice();
     this.rolled = r.rolled;
     this.dice = r.dice;
-    this._autoSkipIfStuck();
-  }
-
-  /** If the current seat has no legal move, clear dice and pass. Keeps bouncing
-   *  (re-rolling) until someone can move — both players being stuck on the bar
-   *  with their entry points blocked is temporary, since the dice re-roll each
-   *  pass. A genuine mutual close-out (astronomically rare) is resolved by pip
-   *  count so the board can never freeze. */
-  _autoSkipIfStuck() {
-    let guard = 0;
-    while (guard++ < 60 && !this.isOver() && this.legalMoves(this.turn).length === 0) {
-      this.turn = other(this.turn);
-      const r = rollDice();
-      this.rolled = r.rolled;
-      this.dice = r.dice;
-    }
-    if (!this.isOver() && this.legalMoves(this.turn).length === 0) {
-      // True deadlock — end by pip count (fewer pips = closer to home = winner).
-      const pip = (seat) => {
-        let t = this.bar[seat] * 25;
-        for (let i = 0; i < NUM_POINTS; i++) {
-          const p = this.points[i];
-          if (p.seat === seat) t += p.count * (seat === 0 ? i + 1 : 24 - i);
-        }
-        return t;
-      };
-      this.winner = pip(0) <= pip(1) ? 0 : 1;
-      this.endReason = 'deadlock';
-      this.dice = [];
-    }
   }
 
   toState() {

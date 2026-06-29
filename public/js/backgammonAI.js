@@ -116,7 +116,9 @@ function scoreMove(game, seat, move, blotWeight) {
 export function chooseBackgammonAction(game, seat, difficulty = 'normal') {
   try {
     const moves = game.legalMoves(seat);
-    if (!moves || moves.length === 0) return null;
+    // No playable move — pass the turn (the manager paces this so the human
+    // sees the bot's dice for a beat first).
+    if (!moves || moves.length === 0) return { type: 'pass' };
     if (moves.length === 1) return moves[0];
 
     if (difficulty === 'easy') {
@@ -139,6 +141,7 @@ export function chooseBackgammonAction(game, seat, difficulty = 'normal') {
     try {
       const moves = game.legalMoves(seat);
       if (moves && moves.length) return moves[0];
+      return { type: 'pass' };
     } catch {
       /* ignore */
     }

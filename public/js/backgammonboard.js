@@ -58,6 +58,7 @@ export class BackgammonRenderer {
     document.removeEventListener('visibilitychange', this._onVis);
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
     if (this._diceSettleT) { clearTimeout(this._diceSettleT); this._diceSettleT = null; }
+    if (this._passTimer) { clearTimeout(this._passTimer); this._passTimer = null; }
   }
 
   /** Begin the cosmetic dice tumble and GUARANTEE a settle redraw afterwards —
@@ -79,6 +80,7 @@ export class BackgammonRenderer {
     const prev = this.state;
     this.state = state;
     this._clearSel();
+    if (this._passTimer) { clearTimeout(this._passTimer); this._passTimer = null; }
 
     // Detect & animate the move that produced this state. Always drop any
     // previous in-flight animation first so a resync can't leave one frozen.
@@ -234,7 +236,8 @@ export class BackgammonRenderer {
     const r = g.ckR;
     if (count <= 5) return 2 * r;
     const maxH = g.fieldH * 0.46;
-    return Math.max(r * 0.5, (maxH - 2 * r) / (count - 1));
+    // Never wider than touching (2r): a tall stack overlaps, it must not spread.
+    return Math.min(2 * r, Math.max(r * 0.5, (maxH - 2 * r) / (count - 1)));
   }
   /** Centre of the k-th checker (0 = nearest baseline) in a stack of `count`. */
   _checkerXY(slot, k, count, g) {
@@ -271,6 +274,12 @@ export class BackgammonRenderer {
     if (this._needRoll()) {
       this._rolledKey = this._turnKey(this.state);
       this._startDiceTumble();
+      // If this roll has no playable move, show it for a beat then pass.
+      const eng = this._engine();
+      if (eng && eng.legalMoves(this.mySeat).length === 0) {
+        clearTimeout(this._passTimer);
+        this._passTimer = setTimeout(() => { this._passTimer = null; this.onAction?.({ type: 'pass' }); }, DICE_MS + 1300);
+      }
       return;
     }
     if (now() < this._diceUntil) return; // ignore taps while dice tumble
@@ -361,6 +370,9 @@ export class BackgammonRenderer {
       ctx.closePath(); ctx.fill();
     }
 
+    // Borne-off checkers, shown as flat stacked slabs in the tray
+    this._drawOff(ctx, g, st);
+
     // Bear-off target glow
     const pulse = 0.5 + 0.5 * Math.sin(now() / 240);
     for (const t of this.targets) {
@@ -425,6 +437,39 @@ export class BackgammonRenderer {
     this._hud(ctx, g, st);
 
     ctx.restore();
+  }
+
+  /** Borne-off checkers drawn as flat, glossy slabs stacked in the off tray —
+   *  seat 0 builds up from the bottom, seat 1 down from the top — with a count. */
+  _drawOff(ctx, g, st) {
+    if (!st.off) return;
+    const FA = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    const fa = (n) => String(n).replace(/\d/g, (d) => FA[+d]);
+    const x = g.offX + g.offW * 0.12, w = g.offW * 0.76;
+    const slabH = Math.max(3, g.ckR * 0.46);
+    for (const seat of [0, 1]) {
+      const n = st.off[seat] || 0;
+      if (!n) continue;
+      const top = seat === 1;
+      const halfH = g.fieldH * 0.46;
+      const step = Math.min(slabH * 1.12, (halfH - slabH) / Math.max(1, n));
+      const color = this._seatColor(seat);
+      for (let k = 0; k < n; k++) {
+        const y = top ? g.m + 3 + k * step : g.m + g.fieldH - 3 - slabH - k * step;
+        const grad = ctx.createLinearGradient(0, y, 0, y + slabH);
+        grad.addColorStop(0, shade(color, 0.4)); grad.addColorStop(1, shade(color, -0.22));
+        this._roundRect(x, y, w, slabH, slabH * 0.45); ctx.fillStyle = grad; ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 1; ctx.stroke();
+      }
+      // count badge near the centre line, on the seat's side
+      const by = top ? g.m + g.fieldH * 0.5 - g.ckR * 1.5 : g.m + g.fieldH * 0.5 + g.ckR * 1.5;
+      ctx.save();
+      ctx.fillStyle = '#fff'; ctx.font = `bold ${g.ckR * 1.05}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = 4;
+      ctx.fillText(`${fa(n)}`, g.offX + g.offW / 2, by);
+      ctx.restore();
+    }
   }
 
   _highlightPoint(ctx, s, g, triH, color, alpha) {
