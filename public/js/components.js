@@ -124,7 +124,7 @@ const HOKM_COLORS = ['#e7503a', '#3d7fe0', '#e8b730', '#3bb15f'];
  * { element, getConfig }.
  */
 export function HokmCustomizer() {
-  const cfg = { gameType: 'hokm', variant: '4', colors: [...HOKM_COLORS], timeLimit: 0, timeIncrement: 0 };
+  const cfg = { gameType: 'hokm', variant: '4', colors: [...HOKM_COLORS], timeLimit: 0, timeIncrement: 0, mode: 'single' };
 
   const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
   let renderer = null;
@@ -179,8 +179,14 @@ export function HokmCustomizer() {
     optGroup('پاداش زمانی هر حرکت', seg(INC_OPTIONS.map((o) => ({ ...o, active: o.value === cfg.timeIncrement })),
       (v) => { cfg.timeIncrement = v; })));
 
+  const modeSeg = seg([
+    { label: 'تک‌دست', value: 'single', active: true },
+    { label: '۷ دست (با کوت)', value: 'match' },
+  ], (v) => { cfg.mode = v; });
+
   const leftCol = h('div', { style: 'flex:1.2' },
     optGroup('تعداد بازیکنان', variantSeg),
+    optGroup('حالت بازی', modeSeg),
     optGroup('کنترل زمان (تایمر)', timeSeg),
     incMount,
     colorsMount,
@@ -196,7 +202,7 @@ export function HokmCustomizer() {
   requestAnimationFrame(refreshPreview);
   return {
     element,
-    getConfig: () => ({ gameType: 'hokm', variant: cfg.variant, colors: cfg.colors.slice(0, players()), timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement }),
+    getConfig: () => ({ gameType: 'hokm', variant: cfg.variant, colors: cfg.colors.slice(0, players()), timeLimit: cfg.timeLimit, timeIncrement: cfg.timeIncrement, mode: cfg.mode }),
   };
 }
 

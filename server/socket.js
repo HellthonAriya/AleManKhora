@@ -257,6 +257,14 @@ export function registerSocket(io, manager) {
       cb?.({ ok: true });
     });
 
+    socket.on('hokm:nextHand', (cb) => {
+      const room = manager.getRoom(socket.data.roomId);
+      if (!room || room.gameType !== 'hokm' || room.game?.phase !== 'hand-end') return cb?.({ ok: false });
+      if (room.seatOf(socket.id) < 0) return cb?.({ ok: false });
+      manager.advanceHokmHand(room);
+      cb?.({ ok: true });
+    });
+
     /* ------------------------------ Rematch ------------------------------ */
     socket.on('game:rematch', (cb) => {
       const room = manager.getRoom(socket.data.roomId);

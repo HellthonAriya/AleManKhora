@@ -562,8 +562,14 @@ export class HokmRenderer {
       ctx.fillStyle = myActive ? GOLD : 'rgba(255,255,255,.75)';
       ctx.font = `${S * 0.028}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const t = st.tricksWon?.[this.mySeat] ?? 0;
+      let matchTxt = '';
+      if (st.matchScores && !st.singleHand) {
+        const meIdx = st.teams ? (this.mySeat >= 0 ? this.mySeat : 0) % 2 : this.mySeat;
+        const mine = st.matchScores[meIdx] ?? 0;
+        matchTxt = ` · 🏆 ${fa(mine)}/${fa(st.handsTarget ?? 7)}`;
+      }
       ctx.fillText(
-        (st.hakem === this.mySeat ? '👑 حاکم · ' : '') + `${fa(t)} / ${fa(st.winThreshold)} دست` + (myActive ? ' · نوبت توست ●' : ''),
+        (st.hakem === this.mySeat ? '👑 حاکم · ' : '') + `${fa(t)} / ${fa(st.winThreshold)} دست` + matchTxt + (myActive ? ' · نوبت توست ●' : ''),
         S / 2, ySub + S * 0.014,
       );
     }

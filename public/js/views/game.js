@@ -58,6 +58,8 @@ export function GameView(roomId) {
   let drawRecvModal = null;   // the incoming draw-offer popup (receiver side)
   let pasurShownRound = 0;    // last Pasur round whose scoring reveal we played
   let pasurRevealHandle = null; // open Pasur reveal overlay, if any
+  let hokmShownHand = 0;      // last Hokm hand whose result popup we showed
+  let hokmHandModal = null;   // open Hokm between-hands result popup, if any
   let pendingOver = null;     // game-over payload deferred until a reveal finishes
 
   // local clock model
@@ -839,6 +841,8 @@ export function GameView(roomId) {
     'game:start': (v) => {
       rematchPending = false; seriesPending = false; myPrediction = null;
       pasurShownRound = 0; pendingOver = null;
+      hokmShownHand = 0;
+      if (hokmHandModal) { hokmHandModal.close?.(); hokmHandModal = null; }
       if (pasurRevealHandle) { pasurRevealHandle.close?.(); pasurRevealHandle = null; }
       if (overModalHandle) { overModalHandle.close(); overModalHandle = null; }
       applyView(v);
@@ -864,6 +868,7 @@ export function GameView(roomId) {
       // final round ends the state already carries the winner — let `game:over`
       // play the FINAL reveal (with the result), not a stray «دست بعد» one.
       if (!gameIsOver() && maybePasurReveal(s, false)) return;
+      maybeHokmHandEnd(s);
       if (status === 'active' && !gameIsOver()) playSound(isMyTurnActive() ? 'turn' : 'move');
     },
     'game:clock': (cv) => { setClock(cv); },
@@ -949,6 +954,33 @@ export function GameView(roomId) {
       },
     });
     return true;
+  }
+
+  /** Hokm match mode: between-hands result popup with a «دست بعد» button. */
+  function maybeHokmHandEnd(s) {
+    if (gameType !== 'hokm') return;
+    if (s.phase !== 'hand-end') { if (hokmHandModal) { hokmHandModal.close?.(); hokmHandModal = null; } return; }
+    if (!s.handResult || s.handResult.handNumber <= hokmShownHand) return;
+    hokmShownHand = s.handResult.handNumber;
+    if (hokmHandModal) { hokmHandModal.close?.(); hokmHandModal = null; }
+    const hr = s.handResult, me = seat < 0 ? 0 : seat;
+    const winnerLabel = hr.teams
+      ? (hr.side === me % 2 ? 'تیم ما' : 'تیم حریف')
+      : (hr.side === me ? 'تو' : `بازیکن ${SEAT_LABELS[hr.side]}`);
+    const ptsLabel = hr.kotOfHakem ? `کوتِ حاکم! +${faNum(3)}` : hr.kot ? `کوت! +${faNum(2)}` : `+${faNum(1)}`;
+    const scoreLine = hr.teams
+      ? `تیم ما ${faNum(hr.matchScores[me % 2])} — حریف ${faNum(hr.matchScores[1 - me % 2])} (تا ${faNum(hr.handsTarget)})`
+      : hr.matchScores.map((v, i) => `${i === me ? 'تو' : 'ب' + SEAT_LABELS[i]}: ${faNum(v)}`).join(' · ');
+    const body = h('div', { class: 'center' },
+      h('div', { style: 'font-size:1.3rem;font-weight:800;margin-bottom:6px' }, `دستِ ${faNum(hr.handNumber)} — ${winnerLabel} برد`),
+      h('div', { style: 'color:var(--accent);font-weight:700;margin-bottom:8px' }, ptsLabel),
+      h('div', { class: 'faint' }, scoreLine));
+    hokmHandModal = modal({
+      title: '🃏 پایان دست',
+      body,
+      actions: [{ label: 'دست بعد ▶', class: 'btn-primary', onClick: () => { if (!spectator) socket.emit('hokm:nextHand'); } }],
+      onClose: () => { hokmHandModal = null; },
+    });
   }
 
   function showGameOver(data) {
@@ -1188,6 +1220,7 @@ export function GameView(roomId) {
     document.removeEventListener('pointermove', onTrayMove);
     renderer?.destroy?.();
     if (pasurRevealHandle) { pasurRevealHandle.dismiss?.(); pasurRevealHandle = null; }
+    if (hokmHandModal) { hokmHandModal.close?.(); hokmHandModal = null; }
     voice.destroy();
     socket.emit('room:leave');
   });

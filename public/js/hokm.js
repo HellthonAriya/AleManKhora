@@ -95,7 +95,16 @@ export class HokmGame {
     this.lastTrickLed = null;
     this.trickNumber = 0;
 
+    // Tricks needed to WIN A HAND (دست).
     this.winThreshold = this.variant === '4' ? 7 : this.variant === '3' ? 9 : 14;
+    // Match layer: a match is several hands. Single-hand mode ends after one
+    // hand; otherwise the first side to `handsTarget` hand-points wins. Hand
+    // points: normal win 1, کوت (sweep) 2, کوتِ حاکم (non-hakem side sweeps) 3.
+    this.singleHand = !!opts.singleHand;
+    this.handsTarget = Number(opts.handsTarget) > 0 ? Number(opts.handsTarget) : 7;
+    this.matchScores = this.teams ? [0, 0] : range(this.numPlayers).map(() => 0);
+    this.handNumber = 1;
+    this.handResult = null;
 
     this.winner = null;
     this.winningTeam = null;
@@ -142,6 +151,11 @@ export class HokmGame {
       tricksWon: this.tricksWon.slice(),
       teamTricks: this.teamTricks ? this.teamTricks.slice() : null,
       winThreshold: this.winThreshold,
+      singleHand: this.singleHand,
+      handsTarget: this.handsTarget,
+      handNumber: this.handNumber,
+      matchScores: this.matchScores ? this.matchScores.slice() : null,
+      handResult: this.handResult ? { ...this.handResult, tricks: this.handResult.tricks.slice(), matchScores: this.handResult.matchScores.slice() } : null,
       winner: this.winner,
       winningTeam: this.winningTeam,
       draw: this.draw,
@@ -188,6 +202,11 @@ export class HokmGame {
     g.tricksWon = (state.tricksWon || []).slice();
     g.teamTricks = state.teamTricks ? state.teamTricks.slice() : null;
     g.winThreshold = state.winThreshold;
+    g.singleHand = !!state.singleHand;
+    g.handsTarget = state.handsTarget || 7;
+    g.handNumber = state.handNumber || 1;
+    g.matchScores = state.matchScores ? state.matchScores.slice() : (g.teams ? [0, 0] : (state.tricksWon || []).map(() => 0));
+    g.handResult = state.handResult ? { ...state.handResult } : null;
     g.winner = state.winner;
     g.winningTeam = state.winningTeam;
     g.draw = state.draw;
@@ -290,32 +309,24 @@ export class HokmGame {
       this.tricksWon[winnerSeat]++;
       if (this.teams) this.teamTricks[winnerSeat % 2]++;
 
-      let over = false;
+      let handOver = false, handWinSide = null; // side = team (teams) or seat
       if (this.teams) {
         const tm = winnerSeat % 2;
-        if (this.teamTricks[tm] >= this.winThreshold) {
-          this.winningTeam = tm;
-          this.winner = winnerSeat; // winnerSeat % 2 === tm by construction
-          this.endReason = 'tricks';
-          over = true;
-        }
+        if (this.teamTricks[tm] >= this.winThreshold) { handWinSide = tm; handOver = true; }
       } else if (this.tricksWon[winnerSeat] >= this.winThreshold) {
-        this.winner = winnerSeat;
-        this.endReason = 'tricks';
-        over = true;
+        handWinSide = winnerSeat; handOver = true;
       }
 
-      if (!over) {
+      if (handOver) {
+        this._endHand(handWinSide);
+      } else {
         this.leader = winnerSeat;
         this.turn = winnerSeat;
         this.trick = [];
         this.ledSuit = null;
-
-        // All hands empty without hitting threshold → award most tricks.
+        // All hands empty without hitting threshold → award the hand on tricks.
         const allEmpty = this.hands.every((h) => h != null && h.length === 0);
-        if (allEmpty) {
-          this.endByCount();
-        }
+        if (allEmpty) this.endByCount();
       }
 
       this.moveCount++;
@@ -351,21 +362,69 @@ export class HokmGame {
     return false;
   }
 
-  /** End the game by trick count (no threshold reached, hands exhausted). */
+  /** End the HAND by trick count (no threshold reached, hands exhausted). */
   endByCount() {
     if (this.teams) {
-      const tm = this.teamTricks[0] >= this.teamTricks[1] ? 0 : 1;
-      this.winningTeam = tm;
-      this.winner = tm; // seat tm has tm % 2 === tm for tm ∈ {0,1}
-      this.endReason = 'tricks';
+      this._endHand(this.teamTricks[0] >= this.teamTricks[1] ? 0 : 1);
     } else {
       let best = 0;
-      for (let s = 1; s < this.numPlayers; s++) {
-        if (this.tricksWon[s] > this.tricksWon[best]) best = s;
-      }
-      this.winner = best;
-      this.endReason = 'tricks';
+      for (let s = 1; s < this.numPlayers; s++) if (this.tricksWon[s] > this.tricksWon[best]) best = s;
+      this._endHand(best);
     }
+  }
+
+  /** Score the finished hand (with کوت), update the match, and either finish
+   *  the match or pause at 'hand-end' for the next deal. `side` is the winning
+   *  team (team mode) or the winning seat (individual). */
+  _endHand(side) {
+    let kot = false, kotOfHakem = false, points = 1;
+    const sweptOpponentsZero = this.teams
+      ? this.teamTricks[1 - side] === 0
+      : range(this.numPlayers).filter((s) => s !== side).every((s) => this.tricksWon[s] === 0);
+    const hakemSide = this.teams ? this.hakem % 2 : this.hakem;
+    if (sweptOpponentsZero) {
+      kot = true;
+      if (side !== hakemSide) { kotOfHakem = true; points = 3; } // non-hakem side swept → کوتِ حاکم
+      else points = 2;                                            // hakem's side swept → کوت
+    }
+    this.matchScores[side] += points;
+    this.trick = []; this.ledSuit = null;
+    this.handResult = {
+      handNumber: this.handNumber, side, points, kot, kotOfHakem, teams: this.teams,
+      hakem: this.hakem, winThreshold: this.winThreshold,
+      tricks: this.teams ? this.teamTricks.slice() : this.tricksWon.slice(),
+      matchScores: this.matchScores.slice(), handsTarget: this.handsTarget,
+    };
+    if (this.singleHand || this.matchScores[side] >= this.handsTarget) {
+      if (this.teams) { this.winningTeam = side; this.winner = side; }
+      else this.winner = side;
+      this.endReason = this.singleHand ? 'tricks' : 'match';
+    } else {
+      this.phase = 'hand-end';
+    }
+  }
+
+  /** Advance to the next hand after the between-hands result (host/timer). The
+   *  hakem stays while their side keeps winning; otherwise it passes on. */
+  nextHand() {
+    if (this.phase !== 'hand-end' || this.isOver()) return false;
+    const hakemSide = this.teams ? this.hakem % 2 : this.hakem;
+    if (this.handResult.side !== hakemSide) this.hakem = (this.hakem + 1) % this.numPlayers;
+    this.handNumber++;
+    this.handResult = null;
+    const deck = shuffle(buildDeck(this.variant === '3'));
+    this.hands = range(this.numPlayers).map(() => []);
+    for (let n = 0; n < 5; n++) this.hands[this.hakem].push(deck[n]);
+    this.deck = deck.slice(5);
+    this.trump = null;
+    this.phase = 'choose-trump';
+    this.turn = this.hakem;
+    this.leader = this.hakem;
+    this.tricksWon = range(this.numPlayers).map(() => 0);
+    this.teamTricks = this.teams ? [0, 0] : null;
+    this.trick = []; this.ledSuit = null;
+    this.lastTrick = []; this.lastTrickWinner = null; this.lastTrickLed = null;
+    return true;
   }
 
   eliminate(seat) {

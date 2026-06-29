@@ -45,7 +45,7 @@ function buildEngine(gameType, config) {
     case 'othello': return new OthelloGame();
     case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5 });
     case 'backgammon': return new BackgammonGame();
-    case 'hokm': return new HokmGame({ variant: config.variant });
+    case 'hokm': return new HokmGame({ variant: config.variant, singleHand: config.singleHand, handsTarget: config.handsTarget });
     case 'pasur': return new PasurGame({ singleRound: config.singleRound });
     case 'monopoly': return new MonopolyGame({
       players: config.players, maxTurns: config.maxTurns,
@@ -176,6 +176,10 @@ function sanitizeHokmConfig(cfg) {
     gameType: 'hokm', variant, players, teams: variant === '4', colors,
     p0Color: colors[0], p1Color: colors[1],
     timeLimit, timeIncrement, ranked: false,
+    // Single-hand is the default (preserves existing series/tournament/quick
+    // games); the multi-hand match (with کوت) is opt-in via mode === 'match'.
+    singleHand: cfg.mode === 'match' ? false : true,
+    handsTarget: 7,
   };
 }
 
@@ -728,6 +732,8 @@ export class GameManager {
       this.finishGame(room, room.game.winner);
     } else if (room.gameType === 'pasur' && room.game.phase === 'round-end') {
       this._pasurRoundEnd(room);
+    } else if (room.gameType === 'hokm' && room.game.phase === 'hand-end') {
+      this._hokmHandEnd(room);
     } else {
       this.scheduleFlag(room);
       this.resetIdleTimer(room);
@@ -735,6 +741,32 @@ export class GameManager {
       if (!this.maybeEndBotGame(room)) this.maybeRunAI(room);
     }
     return result;
+  }
+
+  /** A Hokm hand just ended (match not yet won). Freeze for the result display;
+   *  the client advances via `hokm:nextHand`, with a server-side safety timeout. */
+  _hokmHandEnd(room) {
+    if (room.clock?.timer) { clearTimeout(room.clock.timer); room.clock.timer = null; }
+    this.clearIdleTimer(room);
+    if (room._hokmAdvance) clearTimeout(room._hokmAdvance);
+    room._hokmAdvance = setTimeout(() => this.advanceHokmHand(room), 30000);
+  }
+
+  /** Deal the next Hokm hand after the between-hands result. */
+  advanceHokmHand(room) {
+    if (!room || room.status !== 'active' || room.gameType !== 'hokm') return;
+    if (room.game.phase !== 'hand-end') return;
+    if (room._hokmAdvance) { clearTimeout(room._hokmAdvance); room._hokmAdvance = null; }
+    if (!room.game.nextHand()) return;
+    room.lastActivity = Date.now();
+    room.clock.remaining = new Array(room.numPlayers).fill(room.clock.limitMs);
+    this.startClock(room);
+    this.resetIdleTimer(room);
+    this.emitPerSeat(room, 'game:update', (s) => ({
+      state: room.stateFor(s), turn: room.game.turn, handStart: true,
+    }));
+    this.broadcast(room, 'game:clock', room.clockView());
+    this.maybeRunAI(room);
   }
 
   /** A Pasur round just ended (deck exhausted, match not yet won). Freeze play
