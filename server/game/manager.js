@@ -40,7 +40,7 @@ function buildEngine(gameType, config) {
     case 'chess': return new ChessGame({ variant: '2' });
     case 'chess4': return new ChessGame({ variant: config.teams ? '4team' : '4' });
     case 'chesszade': return new ChessGame({ variant: '2', setup: randomChessSetup({ randomPawns: config.randomPawns, mirror: config.mirror }) });
-    case 'tictactoe': return new TicTacToeGame();
+    case 'tictactoe': return new TicTacToeGame({ size: config.size, players: config.players, firstTurn: config.firstTurn });
     case 'gomoku': return new GomokuGame({ size: config.size || 15 });
     case 'othello': return new OthelloGame();
     case 'dots': return new DotsGame({ rows: config.rows || 5, cols: config.cols || 5 });
@@ -109,6 +109,25 @@ function sanitizeSimpleConfig(cfg, gameType) {
   if (gameType === 'dots') {
     const n = DOTS_SIZES.includes(parseInt(cfg.rows, 10)) ? parseInt(cfg.rows, 10) : 5;
     out.rows = n; out.cols = n;
+  }
+  if (gameType === 'tictactoe') {
+    const players = [2, 3, 4].includes(parseInt(cfg.players, 10)) ? parseInt(cfg.players, 10) : 2;
+    out.players = players;
+    out.size = [3, 4, 5, 6].includes(parseInt(cfg.size, 10)) ? parseInt(cfg.size, 10) : 3;
+    const ttDefaults = ['#36c6ff', '#ff6b6b', '#ffd36b', '#3bb15f'];
+    out.colors = [];
+    for (let i = 0; i < players; i++) out.colors.push(colorRe.test(incoming?.[i]) ? incoming[i] : ttDefaults[i]);
+    out.p0Color = out.colors[0]; out.p1Color = out.colors[1] || out.colors[0];
+    out.firstTurn = cfg.firstTurn === 'random'
+      ? 'random'
+      : ([0, 1, 2, 3].includes(parseInt(cfg.firstTurn, 10)) && parseInt(cfg.firstTurn, 10) < players ? parseInt(cfg.firstTurn, 10) : 0);
+    if (Array.isArray(cfg.ttSymbols)) {
+      out.ttSymbols = [];
+      for (let i = 0; i < players; i++) {
+        const s = cfg.ttSymbols[i];
+        out.ttSymbols.push(typeof s === 'string' && s.length > 0 && s.length <= 4 ? s : '');
+      }
+    }
   }
   return out;
 }

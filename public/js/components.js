@@ -509,10 +509,13 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
   const cfg = {
     gameType,
     colors: [...(SIMPLE_DEFAULT_COLORS[gameType] || ['#36c6ff', '#ff6b6b'])],
-    size: gameType === 'gomoku' ? 15 : gameType === 'dots' ? 5 : 0,
+    size: gameType === 'gomoku' ? 15 : gameType === 'dots' ? 5 : gameType === 'tictactoe' ? 3 : 0,
     timeLimit: 0,
     timeIncrement: 0,
-    mode: 'match', // pasur: 'match' (to 62) | 'single' (one hand)
+    mode: 'match',                  // pasur: 'match' (to 62) | 'single' (one hand)
+    players: 2,                     // tic-tac-toe: 2–4
+    ttSymbols: ['✕', '◯', '▲', '◆'], // tic-tac-toe per-seat marks
+    firstPlayer: 'me',              // tic-tac-toe: 'me' | 'opponent' | 'random'
   };
 
   const previewCanvas = h('canvas', { style: 'width:100%;aspect-ratio:1;border-radius:14px' });
@@ -520,7 +523,7 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
   function buildEngine() {
     if (gameType === 'gomoku') return new GomokuGame({ size: cfg.size });
     if (gameType === 'othello') return new OthelloGame();
-    if (gameType === 'tictactoe') return new TicTacToeGame();
+    if (gameType === 'tictactoe') return new TicTacToeGame({ size: cfg.size, players: cfg.players });
     if (gameType === 'dots') return new DotsGame({ rows: cfg.size, cols: cfg.size });
     if (gameType === 'pasur') return new PasurGame();
     return new BackgammonGame();
@@ -543,7 +546,7 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
     if (!renderer) renderer = buildRenderer();
     const g = buildEngine();
     seed(g);
-    renderer.setConfig({ colors: [...cfg.colors] });
+    renderer.setConfig({ colors: [...cfg.colors], ttSymbols: gameType === 'tictactoe' ? [...cfg.ttSymbols] : undefined });
     renderer.setMySeat(0);
     renderer.setState(g.toState(), { animate: false });
   }
@@ -556,6 +559,40 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
       : [{ label: '۴×۴', value: 4 }, { label: '۵×۵', value: 5 }, { label: '۶×۶', value: 6 }, { label: '۷×۷', value: 7 }];
     sizeMount.append(optGroup('اندازهٔ تخته',
       seg(opts.map((o) => ({ ...o, active: o.value === cfg.size })), (v) => { cfg.size = v; refreshPreview(); })));
+  }
+
+  /* --- tic-tac-toe: board size, players, first move, per-seat symbols --- */
+  const ttMount = h('div', {});
+  const ttSymsMount = h('div', {});
+  if (gameType === 'tictactoe') {
+    const SYMBOL_PALETTE = ['✕', '◯', '▲', '◆', '★', '●', '■', '♥', '♦', '♣', '♠', '✦', '🔥', '⚡', '🌟', '💎', '🐱', '🐶', '🍀', '👑', '🌙', '⚽', '🍕', '🚀'];
+    const seatName = (i) => i === 0 ? 'تو' : `بازیکن ${['۱', '۲', '۳', '۴'][i]}`;
+    function rebuildSyms() {
+      ttSymsMount.innerHTML = '';
+      for (let i = 0; i < cfg.players; i++) {
+        const row = h('div', { class: 'swatches', style: 'flex-wrap:wrap;gap:4px' });
+        SYMBOL_PALETTE.forEach((sym) => {
+          const b = h('button', {
+            type: 'button',
+            class: 'btn btn-sm' + (cfg.ttSymbols[i] === sym ? ' btn-primary' : ''),
+            style: 'min-width:34px;font-size:1.1rem;padding:2px 6px',
+            onclick: () => { cfg.ttSymbols[i] = sym; [...row.children].forEach((c) => c.classList.remove('btn-primary')); b.classList.add('btn-primary'); refreshPreview(); },
+          }, sym);
+          row.append(b);
+        });
+        ttSymsMount.append(optGroup(`نمادِ ${seatName(i)}`, row));
+      }
+    }
+    ttMount.append(optGroup('اندازهٔ تخته',
+      seg([3, 4, 5, 6].map((v) => ({ label: `${faNum(v)}×${faNum(v)}`, value: v, active: v === cfg.size })),
+        (v) => { cfg.size = Number(v); refreshPreview(); })));
+    ttMount.append(optGroup('تعداد بازیکنان',
+      seg([2, 3, 4].map((v) => ({ label: faNum(v), value: v, active: v === cfg.players })),
+        (v) => { cfg.players = Number(v); rebuildSyms(); refreshPreview(); })));
+    ttMount.append(optGroup('نوبتِ اول',
+      seg([{ label: 'اول من', value: 'me', active: true }, { label: 'اول حریف', value: 'opponent' }, { label: 'تصادفی', value: 'random' }],
+        (v) => { cfg.firstPlayer = v; })));
+    rebuildSyms();
   }
 
   /* --- piece colours --- */
@@ -602,9 +639,11 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
   const leftCol = h('div', { style: 'flex:1.2' },
     modeMount,
     sizeMount,
+    ttMount,
     optGroup('کنترل زمان (تایمر)', timeSeg),
     incMount,
     colorsMount,
+    ttSymsMount,
   );
 
   const element = h('div', { class: 'row', style: 'align-items:flex-start' },
@@ -622,6 +661,11 @@ export function SimpleCustomizer({ gameType = 'tictactoe' } = {}) {
       if (gameType === 'gomoku') out.size = cfg.size;
       if (gameType === 'dots') { out.rows = cfg.size; out.cols = cfg.size; }
       if (gameType === 'pasur') out.mode = cfg.mode;
+      if (gameType === 'tictactoe') {
+        out.size = cfg.size; out.players = cfg.players;
+        out.ttSymbols = cfg.ttSymbols.slice(0, cfg.players);
+        out.firstTurn = cfg.firstPlayer === 'me' ? 0 : cfg.firstPlayer === 'opponent' ? 1 : 'random';
+      }
       return out;
     },
   };

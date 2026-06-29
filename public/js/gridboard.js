@@ -256,15 +256,31 @@ export class GridRenderer {
   }
   _drawMark(ctx, seat, cx, cy, cell, scale) {
     const color = this._seatColor(seat);
+    const sym = this.config?.ttSymbols?.[seat];
+    // A custom glyph symbol (emoji/shape) chosen for this player.
+    if (sym) {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = cell * 0.06;
+      ctx.font = `bold ${cell * 0.66 * scale}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(sym, cx, cy + cell * 0.02);
+      ctx.restore();
+      return;
+    }
     const r = cell * 0.28 * scale;
     ctx.save();
-    ctx.lineWidth = Math.max(3, cell * 0.1); ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(3, cell * 0.1); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.strokeStyle = color;
-    if (seat === 0) { // X
+    if (seat === 0) {            // ✕
       ctx.beginPath(); ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
       ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r); ctx.stroke();
-    } else { // O
+    } else if (seat === 1) {     // ◯
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    } else if (seat === 2) {     // △
+      ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy + r); ctx.lineTo(cx - r, cy + r); ctx.closePath(); ctx.stroke();
+    } else {                     // ◇
+      ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath(); ctx.stroke();
     }
     ctx.restore();
   }

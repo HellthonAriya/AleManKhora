@@ -262,6 +262,7 @@ export function GameView(roomId) {
     ensureRenderer();
     if (isChess) renderer.setConfig({ boardTheme: config.boardTheme, colors: config.colors });
     else if (gameType === 'quoridor') renderer.setConfig({ theme: config.theme, colors: config.colors || [config.p0Color, config.p1Color, '#ffd36b', '#9b8cff'] });
+    else if (gameType === 'tictactoe') renderer.setConfig({ colors: config.colors || [config.p0Color, config.p1Color], ttSymbols: config.ttSymbols });
     else renderer.setConfig({ colors: config.colors || [config.p0Color, config.p1Color] });
     renderer.setMySeat(seat);
     renderer.setState(state);
@@ -399,7 +400,7 @@ export function GameView(roomId) {
       case 'othello': return wrap(`⬤ ${faNum(state.scores?.[s] ?? 0)} مهره`);
       case 'dots': return wrap(`▦ ${faNum(state.scores?.[s] ?? 0)} خانه`);
       case 'backgammon': return wrap(`✓ ${faNum(state.off?.[s] ?? 0)} از ۱۵`);
-      case 'tictactoe': return wrap(s === 0 ? '✕' : '◯');
+      case 'tictactoe': return wrap((config?.ttSymbols?.[s]) || ['✕', '◯', '▲', '◆'][s] || `بازیکن ${s + 1}`);
       case 'gomoku': return wrap(s === 0 ? '● سیاه' : '○ سفید');
       case 'hokm': {
         const tricks = state.tricksWon?.[s] ?? 0;
