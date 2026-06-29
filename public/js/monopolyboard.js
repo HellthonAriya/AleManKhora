@@ -176,11 +176,20 @@ export class MonopolyRenderer {
     ctx.save();
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     ctx.clearRect(0, 0, S, S);
-    // backdrop
-    this._rr(0, 0, S, S, 14); ctx.fillStyle = '#0c2c1d'; ctx.fill();
-    // inner felt
     const c = this.C;
-    ctx.fillStyle = FELT; ctx.fillRect(c, c, S - 2 * c, S - 2 * c);
+    // backdrop — deep green gradient with a soft outer frame
+    const bg = ctx.createLinearGradient(0, 0, S, S);
+    bg.addColorStop(0, '#0e3322'); bg.addColorStop(1, '#082316');
+    this._rr(0, 0, S, S, 16); ctx.fillStyle = bg; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,215,107,.18)'; ctx.lineWidth = 2;
+    this._rr(3, 3, S - 6, S - 6, 14); ctx.stroke();
+    // inner felt with a centre sheen and a vignette for depth
+    const felt = ctx.createRadialGradient(S / 2, S / 2, S * 0.12, S / 2, S / 2, S * 0.62);
+    felt.addColorStop(0, '#1b5235'); felt.addColorStop(1, '#123a26');
+    ctx.fillStyle = felt; ctx.fillRect(c, c, S - 2 * c, S - 2 * c);
+    const vig = ctx.createRadialGradient(S / 2, S / 2, S * 0.3, S / 2, S / 2, S * 0.6);
+    vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,.32)');
+    ctx.fillStyle = vig; ctx.fillRect(c, c, S - 2 * c, S - 2 * c);
 
     this.tileRects = [];
     this.buttons = [];
@@ -198,22 +207,35 @@ export class MonopolyRenderer {
   _drawTile(i) {
     const ctx = this.ctx, t = BOARD[i], r = this._tileRect(i);
     this.tileRects.push({ i, ...r });
-    // base
-    ctx.fillStyle = '#f4f1e6';
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1;
-    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    // soft drop shadow under each tile for depth
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = Math.max(2, r.w * 0.06);
+    ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 1;
+    // base — subtle parchment gradient
+    const grad = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+    grad.addColorStop(0, '#fbf8ef'); grad.addColorStop(1, '#ece6d3');
+    ctx.fillStyle = grad;
+    this._rr(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, Math.min(r.w, r.h) * 0.06); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1;
+    this._rr(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, Math.min(r.w, r.h) * 0.06); ctx.stroke();
 
     if (r.edge === 'corner') { this._drawCorner(i, r); }
     else if (t.type === 'prop') {
-      // colour band on the inner edge
+      // colour band on the inner edge (with a soft gloss)
       const col = GROUP_COLOR[t.group];
       const bd = Math.min(r.w, r.h) * 0.26;
       ctx.fillStyle = col;
-      if (r.edge === 'bottom') ctx.fillRect(r.x, r.y, r.w, bd);
-      else if (r.edge === 'top') ctx.fillRect(r.x, r.y + r.h - bd, r.w, bd);
-      else if (r.edge === 'left') ctx.fillRect(r.x + r.w - bd, r.y, bd, r.h);
-      else ctx.fillRect(r.x, r.y, bd, r.h);
+      let bx = r.x, by = r.y, bw = r.w, bh = bd;
+      if (r.edge === 'bottom') { by = r.y; }
+      else if (r.edge === 'top') { by = r.y + r.h - bd; }
+      else if (r.edge === 'left') { bx = r.x + r.w - bd; bw = bd; bh = r.h; }
+      else { bw = bd; bh = r.h; }
+      ctx.fillRect(bx, by, bw, bh);
+      const gloss = ctx.createLinearGradient(bx, by, bx, by + bh);
+      gloss.addColorStop(0, 'rgba(255,255,255,.35)'); gloss.addColorStop(0.5, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gloss; ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 0.75; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
       this._tileLabel(r, t.name, `${fa(t.price)}`);
       this._drawHouses(i, r, bd);
     } else if (t.type === 'rail') {
@@ -351,12 +373,20 @@ export class MonopolyRenderer {
     const x0 = c, y0 = c, w = S - 2 * c, h = S - 2 * c;
     const st = this.state;
 
-    // diagonal logo strip
+    // centre logo with a soft glow and gold gradient
     ctx.save();
     ctx.translate(x0 + w / 2, y0 + h * 0.16);
-    ctx.fillStyle = GOLD; ctx.font = `bold ${w * 0.085}px sans-serif`;
+    const fs = w * 0.092;
+    ctx.font = `bold ${fs}px "Vazirmatn", sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(255,215,107,.55)'; ctx.shadowBlur = fs * 0.5;
+    const lg = ctx.createLinearGradient(0, -fs / 2, 0, fs / 2);
+    lg.addColorStop(0, '#ffe89a'); lg.addColorStop(1, '#e8a93c');
+    ctx.fillStyle = lg;
     ctx.fillText('مونوپولی', 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(120,80,10,.55)'; ctx.lineWidth = Math.max(1, fs * 0.02);
+    ctx.strokeText('مونوپولی', 0, 0);
     ctx.restore();
 
     // money / players panel
