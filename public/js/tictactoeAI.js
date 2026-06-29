@@ -3,105 +3,201 @@
  * ==================================
  * `chooseTicTacToeAction(game, seat, difficulty)` returns one legal action.
  *
- * On a classic 3×3 / 2-player board it uses perfect minimax (hard never loses).
- * On larger boards or with 3–4 players the tree is far too big, so it uses a
- * fast heuristic: take an immediate win, block any opponent's immediate win,
- * then favour central cells that best extend its own lines (and deny the
- * opponents'). `easy` plays mostly randomly.
+ * Two-player boards use a negamax search with alpha-beta pruning, threat-based
+ * (windowed) evaluation, proximity move generation and forcing-move ordering —
+ * so it sees deep combinations and double-threats (forks), not just the next
+ * move. Bigger boards search shallower but the evaluation stays strong.
+ *
+ * Multiplayer (3–4) boards can't use a clean minimax, so they use a strong
+ * one-ply heuristic: take a win, block any opponent's win, make a fork, block
+ * an opponent's fork, otherwise maximise own threats minus the strongest
+ * opponent's.  `easy` plays mostly at random.
  */
 
-import { TicTacToeGame } from './tictactoe.js';
+const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+const WIN = 1e7;
+const INF = 1e9;
+// Value of a window holding `count` of one player's marks (rest empty).
+const WW = [0, 1, 14, 160, 1800, 20000, 220000];
+const wv = (n) => WW[Math.min(n, WW.length - 1)];
 
+const _winCache = {};
+function windowsFor(N, K) {
+  const key = N + '_' + K;
+  if (_winCache[key]) return _winCache[key];
+  const out = [];
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    for (const [dr, dc] of DIRS) {
+      const cells = []; let ok = true;
+      for (let k = 0; k < K; k++) {
+        const rr = r + dr * k, cc = c + dc * k;
+        if (rr < 0 || rr >= N || cc < 0 || cc >= N) { ok = false; break; }
+        cells.push(rr * N + cc);
+      }
+      if (ok) out.push(cells);
+    }
+  }
+  _winCache[key] = out;
+  return out;
+}
+
+function makeCtx(game) {
+  return { N: game.size, K: game.winLength, wins: windowsFor(game.size, game.winLength), nodes: 0, budget: 130000, root: 0 };
+}
+const toRC = (idx, N) => ({ type: 'place', r: Math.floor(idx / N), c: idx % N });
 const rand = (a) => a[Math.floor(Math.random() * a.length)];
 
-/* ───────────────────────── classic 3×3 minimax ─────────────────────────── */
-function minimax(game, me, alpha, beta, depth) {
-  if (game.winner !== null) return game.winner === me ? 10 - depth : depth - 10;
-  if (game.draw) return 0;
-  const seat = game.turn;
-  const maximizing = seat === me;
-  let best = maximizing ? -Infinity : Infinity;
-  for (const mv of game.legalMoves(seat)) {
-    const child = TicTacToeGame.fromState(game.toState());
-    child.apply(seat, mv);
-    const score = minimax(child, me, alpha, beta, depth + 1);
-    if (maximizing) { if (score > best) best = score; if (best > alpha) alpha = best; }
-    else { if (score < best) best = score; if (best < beta) beta = best; }
-    if (beta <= alpha) break;
+/** Did placing `seat` at `idx` make K-in-a-row through it? */
+function winsAt(board, ctx, idx, seat) {
+  const N = ctx.N, K = ctx.K, r0 = Math.floor(idx / N), c0 = idx % N;
+  for (const [dr, dc] of DIRS) {
+    let cnt = 1;
+    for (let s = 1; s < K; s++) { const r = r0 + dr * s, c = c0 + dc * s; if (r < 0 || r >= N || c < 0 || c >= N || board[r * N + c] !== seat) break; cnt++; }
+    for (let s = 1; s < K; s++) { const r = r0 - dr * s, c = c0 - dc * s; if (r < 0 || r >= N || c < 0 || c >= N || board[r * N + c] !== seat) break; cnt++; }
+    if (cnt >= K) return true;
   }
-  return best;
-}
-function minimaxChoice(game, seat, difficulty) {
-  const moves = game.legalMoves(seat);
-  let bestScore = -Infinity, bestMove = null;
-  const scored = [];
-  for (const mv of moves) {
-    const child = TicTacToeGame.fromState(game.toState());
-    child.apply(seat, mv);
-    const score = minimax(child, seat, -Infinity, Infinity, 1);
-    scored.push({ mv, score });
-    if (score > bestScore) { bestScore = score; bestMove = mv; }
-  }
-  if (difficulty === 'normal' && Math.random() < 0.25) {
-    const worse = scored.filter((s) => s.score < bestScore);
-    if (worse.length) return rand(worse).mv;
-  }
-  return bestMove || rand(moves);
+  return false;
 }
 
-/* ───────────────────────────── heuristic ───────────────────────────────── */
-/** Would placing `seat` at (r,c) complete a winning line? (mutate+restore) */
-function completes(game, r, c, seat) {
-  const idx = r * game.size + c;
-  game.board[idx] = seat;
-  const win = game._winLineAt(idx, seat);
-  game.board[idx] = null;
-  return !!win;
-}
-/** Longest own run a cell could belong to (open-ended runs weighted higher). */
-function runScore(game, r, c, seat) {
-  const N = game.size, K = game.winLength;
-  const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
-  let score = 0;
-  for (const [dr, dc] of dirs) {
-    let run = 1, open = 0;
-    for (const sgn of [1, -1]) {
-      for (let s = 1; s < K; s++) {
-        const rr = r + dr * s * sgn, cc = c + dc * s * sgn;
-        if (rr < 0 || rr >= N || cc < 0 || cc >= N) break;
-        const v = game.board[rr * N + cc];
-        if (v === seat) run++;
-        else { if (v === null) open++; break; }
-      }
+/** Empty cells adjacent (Chebyshev ≤1) to any placed mark; centre if empty. */
+function genMoves(board, ctx) {
+  const N = ctx.N, out = [], seen = new Set();
+  let any = false;
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] < 0) continue;
+    any = true;
+    const r = Math.floor(i / N), c = i % N;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const rr = r + dr, cc = c + dc;
+      if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
+      const j = rr * N + cc;
+      if (board[j] < 0 && !seen.has(j)) { seen.add(j); out.push(j); }
     }
-    if (run + open >= K) score += run * run + open * 0.25; // only count viable lines
+  }
+  if (!any) return [Math.floor((N * N) / 2)];
+  return out;
+}
+
+/** Static eval from `side`'s view vs `opp` (windowed threat count). */
+function evalSide(board, ctx, side, opp) {
+  let score = 0;
+  for (const cells of ctx.wins) {
+    let cm = 0, co = 0;
+    for (const i of cells) { const v = board[i]; if (v === side) cm++; else if (v === opp) co++; }
+    if (cm && co) continue;          // contested window → dead
+    if (cm) score += wv(cm);
+    else if (co) score -= wv(co);
   }
   return score;
 }
 
-function heuristicChoice(game, seat, moves, difficulty) {
-  const N = game.size;
-  // 1) win now
-  const wins = moves.filter((m) => completes(game, m.r, m.c, seat));
-  if (wins.length) return rand(wins);
-  // 2) block any opponent's immediate win
-  for (const op of game.activePlayers()) {
-    if (op === seat) continue;
-    const block = moves.filter((m) => completes(game, m.r, m.c, op));
-    if (block.length) return rand(block);
-  }
-  // 3) positional score: extend mine, deny theirs, prefer the centre
-  const cx = (N - 1) / 2;
-  const opps = game.activePlayers().filter((s) => s !== seat);
-  let best = moves[0], bestS = -Infinity;
-  for (const m of moves) {
-    let s = runScore(game, m.r, m.c, seat) * 1.0;
-    for (const op of opps) s += runScore(game, m.r, m.c, op) * 0.6; // blocking value
-    s += -(Math.abs(m.r - cx) + Math.abs(m.c - cx)) * 0.35;          // centrality
-    if (difficulty !== 'hard') s += Math.random() * 1.2;
-    if (s > bestS) { bestS = s; best = m; }
+/** Order moves so forcing ones (win, then block) come first → better pruning. */
+function orderMoves(board, ctx, moves, side, opp) {
+  const scored = moves.map((idx) => {
+    board[idx] = side; const w = winsAt(board, ctx, idx, side); board[idx] = -1;
+    let b = false;
+    board[idx] = opp; b = winsAt(board, ctx, idx, opp); board[idx] = -1;
+    return { idx, p: w ? 2 : (b ? 1 : 0) };
+  });
+  scored.sort((a, b) => b.p - a.p);
+  return scored.map((o) => o.idx);
+}
+
+/* ----------------------------- 2-player search --------------------------- */
+function negamax(board, ctx, side, opp, depth, alpha, beta) {
+  if (depth === 0 || ctx.nodes++ > ctx.budget) return evalSide(board, ctx, side, opp);
+  const moves = orderMoves(board, ctx, genMoves(board, ctx), side, opp);
+  if (!moves.length) return 0;
+  let best = -INF;
+  for (const idx of moves) {
+    board[idx] = side;
+    const won = winsAt(board, ctx, idx, side);
+    const val = won ? (WIN - (ctx.root - depth)) : -negamax(board, ctx, opp, side, depth - 1, -beta, -alpha);
+    board[idx] = -1;
+    if (val > best) best = val;
+    if (best > alpha) alpha = best;
+    if (alpha >= beta) break;
   }
   return best;
+}
+
+function searchDepth(N, difficulty) {
+  const hard = N <= 3 ? 9 : N === 4 ? 7 : N === 5 ? 5 : 4;
+  return difficulty === 'hard' ? hard : Math.max(2, hard - 2);
+}
+
+function twoPlayerMove(game, seat, difficulty) {
+  const ctx = makeCtx(game);
+  const opp = seat === 0 ? 1 : 0;
+  const board = game.board.map((v) => (v === null ? -1 : v));
+  const moves = orderMoves(board, ctx, genMoves(board, ctx), seat, opp);
+  const depth = ctx.root = searchDepth(ctx.N, difficulty);
+
+  const scored = [];
+  let best = null, bestV = -INF, alpha = -INF;
+  for (const idx of moves) {
+    board[idx] = seat;
+    const won = winsAt(board, ctx, idx, seat);
+    const v = won ? WIN : -negamax(board, ctx, opp, seat, depth - 1, -INF, -alpha);
+    board[idx] = -1;
+    scored.push({ idx, v });
+    if (v > bestV) { bestV = v; best = idx; }
+    if (bestV > alpha) alpha = bestV;
+  }
+  // Normal: occasionally pick a near-best (not blundering an obvious win/loss).
+  if (difficulty === 'normal' && Math.random() < 0.2) {
+    const ok = scored.filter((s) => s.v > -WIN / 2 && s.v < bestV);
+    if (ok.length) return toRC(rand(ok).idx, ctx.N);
+  }
+  return toRC(best ?? moves[0], ctx.N);
+}
+
+/* ---------------------------- multiplayer heuristic ---------------------- */
+function countWinCells(board, ctx, seat) {
+  let n = 0;
+  for (const j of genMoves(board, ctx)) { board[j] = seat; if (winsAt(board, ctx, j, seat)) n++; board[j] = -1; }
+  return n;
+}
+function evalMulti(board, ctx, seat, opps) {
+  let me = 0, worst = 0;
+  for (const cells of ctx.wins) {
+    const cnt = new Map();
+    let owners = 0, mine = 0;
+    for (const i of cells) { const v = board[i]; if (v < 0) continue; cnt.set(v, (cnt.get(v) || 0) + 1); }
+    if (cnt.size > 1) continue;        // contested → dead
+    if (cnt.size === 0) continue;
+    const [owner, c] = [...cnt.entries()][0];
+    if (owner === seat) me += wv(c);
+    else worst = Math.max(worst, wv(c));
+  }
+  return me - worst;
+}
+function multiMove(game, seat, difficulty) {
+  const ctx = makeCtx(game);
+  const board = game.board.map((v) => (v === null ? -1 : v));
+  const opps = game.activePlayers().filter((s) => s !== seat);
+  const moves = genMoves(board, ctx);
+
+  // 1) win now
+  for (const idx of moves) { board[idx] = seat; const w = winsAt(board, ctx, idx, seat); board[idx] = -1; if (w) return toRC(idx, ctx.N); }
+  // 2) block any opponent's immediate win
+  for (const op of opps) for (const idx of moves) { board[idx] = op; const w = winsAt(board, ctx, idx, op); board[idx] = -1; if (w) return toRC(idx, ctx.N); }
+
+  // 3) score: own fork, block opponent fork, threat balance
+  let best = moves[0], bestS = -INF;
+  for (const idx of moves) {
+    board[idx] = seat;
+    let s = evalMulti(board, ctx, seat, opps);
+    if (countWinCells(board, ctx, seat) >= 2) s += 1e6;     // I make a fork
+    board[idx] = -1;
+    for (const op of opps) {                                 // taking a cell an opponent could fork on
+      board[idx] = op; const of = countWinCells(board, ctx, op); board[idx] = -1;
+      if (of >= 2) s += 6e5;
+    }
+    if (difficulty !== 'hard') s += Math.random() * 1200;
+    if (s > bestS) { bestS = s; best = idx; }
+  }
+  return toRC(best, ctx.N);
 }
 
 export function chooseTicTacToeAction(game, seat, difficulty = 'normal') {
@@ -109,10 +205,8 @@ export function chooseTicTacToeAction(game, seat, difficulty = 'normal') {
     const moves = game.legalMoves(seat);
     if (!moves.length) return null;
     if (difficulty === 'easy') return rand(moves);
-    if (game.size <= 3 && game.numPlayers === 2 && game.winLength <= 3) {
-      return minimaxChoice(game, seat, difficulty);
-    }
-    return heuristicChoice(game, seat, moves, difficulty);
+    if (game.numPlayers === 2) return twoPlayerMove(game, seat, difficulty);
+    return multiMove(game, seat, difficulty);
   } catch (_e) {
     const moves = game.legalMoves(seat);
     return moves && moves.length ? rand(moves) : null;
