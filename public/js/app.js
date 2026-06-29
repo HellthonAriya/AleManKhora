@@ -93,6 +93,7 @@ async function router() {
     return;
   }
 
+  showLoading();
   try {
     const node = await r.view(m);
     clear(appEl);
@@ -103,7 +104,28 @@ async function router() {
   } catch (e) {
     console.error(e);
     clear(appEl).append(h('div', { class: 'card center' }, h('p', { class: 'muted' }, 'خطا در بارگذاری صفحه.')));
+  } finally {
+    hideLoading();
   }
+}
+
+/* Full-screen loading overlay shown during route transitions (e.g. lobby →
+ * game, while the room is being joined). Delayed slightly so instant views
+ * don't flash it. */
+let _loadingEl = null, _loadingTimer = null;
+function showLoading() {
+  if (_loadingTimer || _loadingEl) return;
+  _loadingTimer = setTimeout(() => {
+    _loadingTimer = null;
+    _loadingEl = h('div', { class: 'route-loading' },
+      h('div', { class: 'spinner' }),
+      h('div', { class: 'route-loading-text' }, 'در حال بارگذاری…'));
+    document.body.appendChild(_loadingEl);
+  }, 130);
+}
+function hideLoading() {
+  if (_loadingTimer) { clearTimeout(_loadingTimer); _loadingTimer = null; }
+  if (_loadingEl) { _loadingEl.remove(); _loadingEl = null; }
 }
 
 function NotFound() {

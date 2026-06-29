@@ -449,6 +449,13 @@ table.tbl tr:hover td { background: rgba(255,255,255,.02); }
 .spinner-sm { display: inline-block; width: 15px; height: 15px; border-width: 2px; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 60px; color: var(--text-dim); }
+/* Full-screen overlay shown while a route/view is loading. */
+.route-loading { position: fixed; inset: 0; z-index: 1200; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; color: var(--text-dim);
+  background: rgba(8, 12, 18, 0.72); backdrop-filter: blur(4px); animation: routeFade 0.18s ease; }
+.route-loading .spinner { width: 52px; height: 52px; border-width: 4px; }
+.route-loading-text { font-weight: 700; letter-spacing: 0.02em; }
+@keyframes routeFade { from { opacity: 0; } to { opacity: 1; } }
 .queue-pulse { width: 90px; height: 90px; border-radius: 50%; background: var(--accent-glow); display: grid; place-items: center;
   animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%,100%{ transform: scale(1); opacity:.7;} 50%{ transform: scale(1.12); opacity:1;} }
